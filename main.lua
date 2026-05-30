@@ -4068,7 +4068,7 @@ local function FitInlineActionControls(row)
 	end
 	local count = math.max(1, math.min(#controls, 4))
 	local gap = 10
-	local offset = -math.ceil((gap * (count - 1)) / count)
+	local offset = -((gap * (count - 1)) / count)
 	for _, child in ipairs(controls) do
 		child.Size = UDim2.new(1 / count, offset, 0, 34)
 	end
@@ -4172,7 +4172,7 @@ function Library._CreateButton(tab, config)
 			Name = "ActionRow",
 			BackgroundTransparency = 1,
 			Position = UDim2.new(0, 0, 0, 49),
-			Size = UDim2.new(1, -24, 0, 32),
+			Size = UDim2.new(1, 0, 0, 32),
 			Parent = frame,
 		})
 		CreateListLayout(actionRow, 10, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal)
@@ -4399,7 +4399,7 @@ function Library._CreateToggle(tab, config)
 			Name = "ActionRow",
 			BackgroundTransparency = 1,
 			Position = UDim2.new(0, 0, 0, 49),
-			Size = UDim2.new(1, -24, 0, 32),
+			Size = UDim2.new(1, 0, 0, 32),
 			Parent = frame,
 		})
 		CreateListLayout(actionRow, 10, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal)
