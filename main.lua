@@ -2453,6 +2453,8 @@ function Library:SetTheme(theme)
 					obj.BackgroundColor3 = c.Background
 				elseif name == "Header" or name == "Separator" then
 					obj.BackgroundColor3 = c.Border
+				elseif name == "DividerLine" then
+					obj.BackgroundColor3 = c.Border
 				elseif name == "OptionsContainer" or name == "LanguageOptions" then
 					obj.BackgroundColor3 = c.Secondary
 					obj.BackgroundTransparency = 0.02
@@ -2495,6 +2497,7 @@ function Library:SetTheme(theme)
 					obj.Name == "Content"
 					or obj.Name == "Section"
 					or obj.Name:match("^Section_")
+					or obj.Name == "DividerLabel"
 					or obj.Name == "TabText"
 					or obj.Name == "Label"
 				then
@@ -3243,6 +3246,10 @@ function Library._CreateTab(section, name, icon)
 		return Library._CreateParagraph(self, config)
 	end
 
+	function tabMethods:CreateDivider(config)
+		return Library._CreateDivider(self, config)
+	end
+
 	function tabMethods:CreateSlider(config)
 		return Library._CreateSlider(self, config)
 	end
@@ -3284,6 +3291,10 @@ function Library._CreateTab(section, name, icon)
 			return self:CreateParagraph(title)
 		end
 		return self:CreateParagraph({ Title = title, Content = content })
+	end
+
+	function tabMethods:Divider(name)
+		return self:CreateDivider(name)
 	end
 
 	function tabMethods:Button(name, callback)
@@ -3433,6 +3444,79 @@ function Library._CreateContentSection(tab, name)
 		Parent = tab.content,
 	})
 	return section
+end
+
+function Library._CreateDivider(tab, config)
+	local c = (tab and tab._library and tab._library._c) or c
+	local title = ""
+	if type(config) == "table" then
+		title = tostring(config.Name or config.Title or config.Text or "")
+	elseif config ~= nil then
+		title = tostring(config)
+	end
+
+	local frame = CreateInstance("Frame", {
+		Name = "Divider",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, title ~= "" and 28 or 14),
+		Parent = tab.content,
+	})
+
+	local label
+	if title ~= "" then
+		label = CreateInstance("TextLabel", {
+			Name = "DividerLabel",
+			FontFace = f.Regular,
+			TextColor3 = c.TextDark,
+			Text = title,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			BackgroundTransparency = 1,
+			TextSize = textsize.Small,
+			Size = UDim2.new(1, 0, 0, 17),
+			Parent = frame,
+		})
+	end
+
+	local line = CreateInstance("Frame", {
+		Name = "DividerLine",
+		BackgroundColor3 = c.Border,
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0, 0, 0, title ~= "" and 23 or 7),
+		Size = UDim2.new(1, 0, 0, 1),
+		Parent = frame,
+	})
+
+	return {
+		Frame = frame,
+		SetText = function(_, newText)
+			newText = tostring(newText or "")
+			if not label and newText ~= "" then
+				frame.Size = UDim2.new(1, 0, 0, 28)
+				line.Position = UDim2.new(0, 0, 0, 23)
+				label = CreateInstance("TextLabel", {
+					Name = "DividerLabel",
+					FontFace = f.Regular,
+					TextColor3 = c.TextDark,
+					Text = newText,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					BackgroundTransparency = 1,
+					TextSize = textsize.Small,
+					Size = UDim2.new(1, 0, 0, 17),
+					Parent = frame,
+				})
+			elseif label then
+				label.Text = newText
+			end
+		end,
+		SetTitle = function(self, newText)
+			return self:SetText(newText)
+		end,
+		Destroy = function()
+			frame:Destroy()
+		end,
+	}
 end
 
 function Library._CreateParagraph(tab, config)
@@ -5001,13 +5085,14 @@ function Library._CreateColorPicker(tab, config)
 	local currentColor = default
 	local hue, sat, val = currentColor:ToHSV()
 	local expanded = false
+	local compact = config.Compact == true
 
 	local frame = CreateInstance("Frame", {
 		Name = "ColorPicker_" .. name,
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, s.Button.Height),
+		Size = compact and UDim2.new(0, 118, 0, 34) or UDim2.new(1, 0, 0, s.Button.Height),
 		Parent = tab.content,
 	})
 	CreateCorner(frame, 8)
@@ -5020,21 +5105,22 @@ function Library._CreateColorPicker(tab, config)
 		Text = name,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 10, 0, 0),
-		TextSize = textsize.Normal,
-		Size = UDim2.new(1, -50, 1, 0),
+		Position = compact and UDim2.new(0, 14, 0, 0) or UDim2.new(0, 10, 0, 0),
+		TextSize = compact and textsize.Small or textsize.Normal,
+		Size = compact and UDim2.new(1, -48, 1, 0) or UDim2.new(1, -50, 1, 0),
 		Parent = frame,
 	})
 
 	local colorPreview = CreateInstance("Frame", {
 		Name = "ColorPreview",
 		BackgroundColor3 = currentColor,
-		Position = UDim2.new(1, -48, 0.5, -9),
-		Size = UDim2.new(0, 38, 0, 18),
+		AnchorPoint = compact and Vector2.new(1, 0.5) or Vector2.new(0, 0),
+		Position = compact and UDim2.new(1, -14, 0.5, 0) or UDim2.new(1, -48, 0.5, -9),
+		Size = compact and UDim2.new(0, 14, 0, 14) or UDim2.new(0, 38, 0, 18),
 		ZIndex = 2,
 		Parent = frame,
 	})
-	CreateCorner(colorPreview, 6)
+	CreateCorner(colorPreview, compact and 100 or 6)
 	CreateStroke(colorPreview)
 
 	local previewBtn = CreateInstance("TextButton", {
