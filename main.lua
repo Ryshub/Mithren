@@ -5010,12 +5010,23 @@ function Library._CreateConfigSection(tab, config)
 	if #savedConfigs == 0 then
 		savedConfigs = { lib._currentConfig or "default" }
 	end
+	local selectedConfig = lib._currentConfig or savedConfigs[1]
+	local selectedConfigExists = false
+	for _, configName in ipairs(savedConfigs) do
+		if configName == selectedConfig then
+			selectedConfigExists = true
+			break
+		end
+	end
+	if not selectedConfigExists then
+		selectedConfig = savedConfigs[1]
+	end
 
 	local configDropdown
 	configDropdown = Library._CreateDropdown(tab, {
 		Name = config.SelectLabel or "Elegir save",
 		Options = savedConfigs,
-		Default = savedConfigs[1],
+		Default = selectedConfig,
 		Callback = function(selected)
 			local selectedName = SanitizeConfigName(selected)
 			configNameBox:SetText(selectedName)
