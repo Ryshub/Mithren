@@ -1443,11 +1443,52 @@ function Library:_SetRegisteredKeybind(id, keyCode)
 	self._keybinds[id].enabled = resolved ~= Enum.KeyCode.Unknown
 end
 
+function Library:_RefreshFloatingBubbles()
+	local c = self._c or c
+	if self._mobileToggle then
+		self._mobileToggle.BackgroundColor3 = c.Secondary
+		local stroke = self._mobileToggle:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Color = c.Border
+			stroke.Transparency = 0.25
+		end
+		for _, obj in ipairs(self._mobileToggle:GetDescendants()) do
+			if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
+				obj.ImageColor3 = c.Accent
+			elseif obj:IsA("TextLabel") or obj:IsA("TextButton") then
+				obj.TextColor3 = c.Text
+			elseif obj:IsA("UIGradient") then
+				obj.Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, c.Secondary),
+					ColorSequenceKeypoint.new(1, c.Background),
+				})
+			end
+		end
+	end
+	if self.screenGui then
+		for _, obj in ipairs(self.screenGui:GetDescendants()) do
+			if typeof(obj.Name) == "string" and obj.Name:match("^ActionBubble_") then
+				local button = obj:FindFirstChild("Button")
+				if button and button:IsA("TextButton") then
+					local active = button:GetAttribute("MithrenBubbleActive") == true
+					button.BackgroundColor3 = active and c.Accent or c.Secondary
+					button.TextColor3 = active and c.Background or c.Text
+					local stroke = button:FindFirstChildOfClass("UIStroke")
+					if stroke then
+						stroke.Color = active and c.Accent or c.Border
+						stroke.Transparency = active and 0.05 or 0.25
+					end
+				end
+			end
+		end
+	end
+end
+
 function Library:_SetupMobileSupport()
 	local c = self._c or c
 	local mobileButton = CreateInstance("Frame", {
 		Name = "RestoreToggle",
-		BackgroundColor3 = c.Background,
+		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.04,
 		Position = UDim2.new(0.5, 0, 0, 4),
 		Size = UDim2.new(0, 190, 0, 40),
@@ -1457,12 +1498,12 @@ function Library:_SetupMobileSupport()
 		Parent = self.screenGui,
 	})
 	CreateCorner(mobileButton, 12)
-	local mobileStroke = CreateStroke(mobileButton, Color3.fromRGB(68, 68, 68), 0.15)
+	local mobileStroke = CreateStroke(mobileButton, c.Border, 0.25)
 
 	CreateInstance("UIGradient", {
 		Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(28, 28, 28)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 10)),
+			ColorSequenceKeypoint.new(0, c.Secondary),
+			ColorSequenceKeypoint.new(1, c.Background),
 		}),
 		Rotation = 90,
 		Parent = mobileButton,
@@ -1471,7 +1512,7 @@ function Library:_SetupMobileSupport()
 	local mobileIcon = CreateInstance("ImageLabel", {
 		Name = "Icon",
 		Image = "",
-		ImageColor3 = c.Text,
+		ImageColor3 = c.Accent,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 14, 0.5, -9),
 		Size = UDim2.new(0, 18, 0, 18),
@@ -1560,7 +1601,7 @@ function Library:_SetupMobileSupport()
 			BackgroundTransparency = 0,
 			Size = UDim2.new(0, 202, 0, 40),
 		}, animationspeed.Fast)
-		CreateTween(mobileStroke, { Color = c.Accent, Transparency = 0 }, animationspeed.Fast)
+		CreateTween(mobileStroke, { Color = c.Accent, Transparency = 0.05 }, animationspeed.Fast)
 		CreateTween(mobileIcon, { ImageColor3 = c.Accent }, animationspeed.Fast)
 		CreateTween(mobileLabel, { TextColor3 = c.Accent }, animationspeed.Fast)
 	end)
@@ -1570,8 +1611,8 @@ function Library:_SetupMobileSupport()
 			BackgroundTransparency = 0.04,
 			Size = UDim2.new(0, 190, 0, 40),
 		}, animationspeed.Fast)
-		CreateTween(mobileStroke, { Color = Color3.fromRGB(68, 68, 68), Transparency = 0.15 }, animationspeed.Fast)
-		CreateTween(mobileIcon, { ImageColor3 = c.Text }, animationspeed.Fast)
+		CreateTween(mobileStroke, { Color = c.Border, Transparency = 0.25 }, animationspeed.Fast)
+		CreateTween(mobileIcon, { ImageColor3 = c.Accent }, animationspeed.Fast)
 		CreateTween(mobileLabel, { TextColor3 = c.Text }, animationspeed.Fast)
 	end)
 
@@ -2293,10 +2334,7 @@ function Library:SetAccentColor(color)
 	end)
 
 	if self._mobileToggle then
-		local stroke = self._mobileToggle:FindFirstChildOfClass("UIStroke")
-		if stroke and stroke.Transparency == 0 then
-			stroke.Color = color
-		end
+		self:_RefreshFloatingBubbles()
 	end
 
 	if self.resizeBtn then
@@ -2390,6 +2428,7 @@ function Library:SetTheme(theme)
 	if self.container then
 		self.container.BackgroundColor3 = c.Background
 	end
+	self:_RefreshFloatingBubbles()
 	if self.headerLine then
 		self.headerLine.BackgroundColor3 = c.Border
 	end
@@ -3191,6 +3230,11 @@ function Library._CreateTab(section, name, icon)
 
 	local tabMethods = setmetatable({}, { __index = tab })
 
+	function tabMethods:Select()
+		Library._SelectTab(self._library, self, self.button, self.stroke, self.icon, self.textLabel, self.textGradient)
+		return self
+	end
+
 	function tabMethods:CreateSection(sectionName)
 		return Library._CreateContentSection(self, sectionName)
 	end
@@ -3810,8 +3854,14 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 		if not floatingButton then
 			return
 		end
+		floatingButton:SetAttribute("MithrenBubbleActive", active == true)
 		floatingButton.BackgroundColor3 = active and c.Accent or c.Secondary
 		floatingButton.TextColor3 = active and c.Background or c.Text
+		local stroke = floatingButton:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Color = active and c.Accent or c.Border
+			stroke.Transparency = active and 0.05 or 0.25
+		end
 	end
 
 	local function ensureFloating()
@@ -3836,7 +3886,7 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 			Text = bubbleText,
 			TextSize = textsize.Normal,
 			BackgroundColor3 = c.Secondary,
-			BackgroundTransparency = 0.05,
+			BackgroundTransparency = 0.04,
 			BorderSizePixel = 0,
 			Size = UDim2.new(1, 0, 1, 0),
 			ZIndex = 9999,
@@ -3844,6 +3894,7 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 		})
 		CreateCorner(floatingButton, 100)
 		CreateStroke(floatingButton, c.Border, 0.25)
+		updateFloatingVisual(floatingButton:GetAttribute("MithrenBubbleActive") == true)
 
 		local dragging = false
 		local moved = false
