@@ -29,10 +29,6 @@ local c = {
 	},
 }
 
--- `c` (arriba) son los DEFAULTS inmutables del módulo: nunca se escriben.
--- Cada ventana recibe su propia copia (self._c) vía ClonePalette para que
--- SetTheme/SetAccentColor no pisen el tema de otras ventanas. Las subtablas
--- (Toggle/Notification) se copian también para no compartir referencias.
 local function ClonePalette(palette)
 	local copy = {}
 	for key, value in pairs(palette) do
@@ -49,9 +45,6 @@ local function ClonePalette(palette)
 	return copy
 end
 
--- Copia superficial de un config de elemento. La usan los aliases de la API
--- simple (MultiDropdown/NumberBox) cuando reciben una tabla y necesitan setear
--- un flag extra (MultiSelect/NumbersOnly) SIN mutar la tabla del usuario.
 local function shallowCopyConfig(config)
 	local copy = {}
 	if type(config) == "table" then
@@ -100,12 +93,8 @@ Library.__index = Library
 Library.Lucide = nil
 Library.MonochromeIcons = true
 
--- Fallback global solo para call sites sin instancia. En la práctica todas las
--- conexiones se registran por instancia (owner._connections) para que destruir
--- una ventana no desconecte los inputs de otra.
 local Connections = {}
--- Track(owner, connection): owner es la instancia (usa owner._connections).
--- Si owner es nil cae al registro global. Devuelve la conexión.
+
 local function Track(owner, connection)
 	if typeof(connection) ~= "RBXScriptConnection" then
 		return connection
@@ -611,9 +600,6 @@ local function RefreshLucideIcons()
 	end
 end
 
--- Descarta entradas del registro de iconos cuyo objeto ya fue destruido.
--- Evita que LucideIconObjects/LucideFallbackConnections retengan instancias
--- muertas tras destruir/recrear la UI.
 local function PruneLucideRegistry()
 	for index = #LucideIconObjects, 1, -1 do
 		local data = LucideIconObjects[index]
@@ -697,7 +683,6 @@ local function ResolveKeyCode(value, fallback)
 		return value
 	end
 	if type(value) == "string" then
-		-- Enum.KeyCode[<nombre inválido>] lanza error en Roblox, no devuelve nil.
 		local ok, keyCode = pcall(function()
 			return Enum.KeyCode[value]
 		end)
@@ -706,6 +691,21 @@ local function ResolveKeyCode(value, fallback)
 		end
 	end
 	return fallback or Enum.KeyCode.Unknown
+end
+
+local function ResolveKeybindInput(value, fallback)
+	if typeof(value) == "EnumItem" then
+		if value.EnumType == Enum.KeyCode then
+			return value
+		end
+		if value.EnumType == Enum.UserInputType then
+			local btnNum = tonumber(value.Name:match("^MouseButton(%d+)$"))
+			if btnNum ~= nil and btnNum > 3 then
+				return value
+			end
+		end
+	end
+	return ResolveKeyCode(value, fallback)
 end
 
 local function FormatKeyCode(keyCode)
@@ -1006,7 +1006,6 @@ function AcrylicBlur:_Render(distance)
 		task.spawn(Update)
 	end
 
-	-- Conexiones propias del blur (no globales): evita colisión entre ventanas.
 	table.insert(self._conns, workspace.CurrentCamera:GetPropertyChangedSignal("CFrame"):Connect(Update))
 	table.insert(self._conns, workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(Update))
 	table.insert(self._conns, workspace.CurrentCamera:GetPropertyChangedSignal("FieldOfView"):Connect(Update))
@@ -1059,9 +1058,6 @@ function AcrylicBlur:Destroy()
 	self._dof = nil
 end
 
--- Contenedor de notificaciones POR INSTANCIA (self._notificationContainer).
--- Antes era global y, al destruir una ventana, quedaba apuntando a un frame
--- muerto o cruzaba notificaciones entre ventanas.
 local function EnsureNotificationContainer(self)
 	if self._notificationContainer and self._notificationContainer.Parent then
 		return self._notificationContainer
@@ -1077,9 +1073,6 @@ local function EnsureNotificationContainer(self)
 	return self._notificationContainer
 end
 
--- Parenteo seguro del ScreenGui pensado para executors:
--- prioriza gethui()/protect_gui (anti-detección y sobrevive a respawns),
--- cae a CoreGui y finalmente a PlayerGui si nada está disponible.
 local function ParentScreenGui(screenGui)
 	local ok = pcall(function()
 		if typeof(gethui) == "function" then
@@ -1136,8 +1129,7 @@ function Library.new(title, configFolder, config)
 	end
 
 	local self = setmetatable({}, Library)
-	-- Estado por-instancia (multi-ventana): cada ventana tiene su propia palette,
-	-- sus conexiones, su dropdown/picker activo y su contenedor de notificaciones.
+
 	self._c = ClonePalette(c)
 	self._connections = {}
 	self._activeDropdown = nil
@@ -1236,20 +1228,16 @@ function Library.new(title, configFolder, config)
 	return self
 end
 
--- Alias ergonómico de Library.new. Soporta ambas formas de llamada:
---   Mithren.Window({ ... })   (con punto)
---   Mithren:Window({ ... })   (con dos puntos -> primer arg es Library)
 function Library.Window(a, b)
 	local config
 	if a == Library then
-		config = b -- Mithren:Window(cfg)
+		config = b
 	else
-		config = a -- Mithren.Window(cfg)
+		config = a
 	end
 	return Library.new(config)
 end
 
--- Alias de instancia de CreateSection (UI:Section("Principal")).
 function Library:Section(name)
 	return self:CreateSection(name)
 end
@@ -1310,8 +1298,7 @@ function Library:Notify(config)
 		Size = UDim2.new(0, 19, 0, 19),
 		Parent = notification,
 	})
-	-- Notificación transitoria: no la registramos en LucideIconObjects para que
-	-- no se acumulen entradas muertas; el color monocromo igual lo sigue el fallback.
+
 	ApplyLucideIcon(iconImage, icon, "bell", 48, true)
 	CreateInstance("UIAspectRatioConstraint", {
 		Parent = iconImage,
@@ -1357,8 +1344,7 @@ function Library:_SetupKeybindListener()
 			if ui:GetFocusedTextBox() then
 				return
 			end
-			-- Si algún keybind de esta ventana está capturando, no dispares el
-			-- toggle ni otros keybinds: la tecla es para la captura.
+
 			if self._capturingKeybind then
 				return
 			end
@@ -1439,10 +1425,11 @@ function Library:_RegisterKeybind(id, keyCode, callback)
 	if not id or type(callback) ~= "function" then
 		return nil
 	end
+	local resolved = ResolveKeybindInput(keyCode)
 	self._keybinds[id] = {
-		key = ResolveKeyCode(keyCode),
+		key = resolved,
 		callback = callback,
-		enabled = ResolveKeyCode(keyCode) ~= Enum.KeyCode.Unknown,
+		enabled = resolved ~= Enum.KeyCode.Unknown,
 	}
 	return self._keybinds[id]
 end
@@ -1451,7 +1438,7 @@ function Library:_SetRegisteredKeybind(id, keyCode)
 	if not self._keybinds[id] then
 		return
 	end
-	local resolved = ResolveKeyCode(keyCode)
+	local resolved = ResolveKeybindInput(keyCode)
 	self._keybinds[id].key = resolved
 	self._keybinds[id].enabled = resolved ~= Enum.KeyCode.Unknown
 end
@@ -1695,7 +1682,8 @@ function Library:_CreateMainv0rtexd()
 		Parent = self.titleGroup,
 	})
 	CreateCorner(self.versionTagLabel, 6)
-	CreateStroke(self.versionTagLabel, c.Border, 1)
+	self.versionTagStroke = CreateStroke(self.versionTagLabel, c.Border, 0.35)
+	self.versionTagStroke.Name = "VersionTagStroke"
 	CreateInstance("UIPadding", {
 		PaddingLeft = UDim.new(0, 8),
 		PaddingRight = UDim.new(0, 8),
@@ -2432,15 +2420,21 @@ function Library:SetTheme(theme)
 				elseif name == "PickerContainer" then
 					obj.BackgroundColor3 = c.Secondary
 					obj.BackgroundTransparency = 0.02
+				elseif (name:match("^Toggle_") or name:match("^Button_")) and obj:FindFirstChild("ActionRow") then
+					obj.BackgroundTransparency = 1
 				elseif
 					name:match("^Paragraph")
 					or name:match("^Slider_")
 					or name:match("^Toggle_")
 					or name:match("^Button_")
+					or name == "ToggleCard"
+					or name == "ButtonCard"
 					or name:match("^Dropdown_")
 					or name:match("^TextBox_")
 					or name:match("^ColorPicker_")
 					or name:match("^Keybind_")
+					or name == "InlineKeybindBox"
+					or name == "InlineBubbleBox"
 					or name == "SelectedDisplay"
 					or name == "TextBoxContainer"
 					or name == "LanguageSelect"
@@ -2487,6 +2481,9 @@ function Library:SetTheme(theme)
 				end
 			elseif obj:IsA("UIStroke") then
 				obj.Color = c.Border
+				if obj.Name == "VersionTagStroke" then
+					obj.Transparency = 0.35
+				end
 			elseif obj:IsA("UIGradient") then
 				if obj.Parent and obj.Parent.Name == "TabText" then
 					obj.Color = ColorSequence.new({
@@ -2717,7 +2714,7 @@ function Library:Destroy()
 		self._languageInputConn:Disconnect()
 		self._languageInputConn = nil
 	end
-	-- Cierra dropdown/picker abiertos DE ESTA ventana (desconecta sus listeners).
+
 	if self._activeDropdown then
 		self._activeDropdown()
 	end
@@ -2765,8 +2762,6 @@ function DeserializeConfigValue(value)
 	if type(value) == "table" and value._type == "Color3" then
 		return Color3.new(value.R, value.G, value.B)
 	elseif type(value) == "table" and value._type == "EnumItem" then
-		-- Indexar Enum/EnumItem con un nombre inválido lanza error; protegemos
-		-- contra configs corruptas devolviendo nil en vez de romper el load.
 		local ok, result = pcall(function()
 			local enumType = Enum[tostring(value._enum):gsub("^Enum%.", "")]
 			return enumType and enumType[value._value] or nil
@@ -3071,7 +3066,6 @@ function Library:CreateSection(name)
 		return Library._CreateTab(self, tabName, icon)
 	end
 
-	-- Alias simple de CreateTab.
 	function sectionMethods:Tab(tabName, icon)
 		return self:CreateTab(tabName, icon)
 	end
@@ -3237,11 +3231,6 @@ function Library._CreateTab(section, name, icon)
 		return Library._CreateConfigSection(self, config)
 	end
 
-	-- ───────────────────────────────────────────────────────────────────
-	-- API simple (aliases). Cada uno acepta forma posicional O forma tabla,
-	-- delega en el CreateX existente y devuelve el MISMO handle. No duplican
-	-- lógica visual; son solo wrappers.
-	-- ───────────────────────────────────────────────────────────────────
 	function tabMethods:Section(sectionName)
 		return self:CreateSection(sectionName)
 	end
@@ -3320,10 +3309,6 @@ function Library._CreateTab(section, name, icon)
 		})
 	end
 
-	-- Keybind simple: el callback se dispara al PRESIONAR la tecla (acción del
-	-- keybind) y recibe la tecla actualmente asignada. Para reaccionar al rebind
-	-- usá la forma tabla con `Changed`. (Decisión conservadora ante la ambigüedad
-	-- Callback=acción vs Changed=rebind.)
 	function tabMethods:Keybind(name, default, callback)
 		if type(name) == "table" then
 			return self:CreateKeybind(name)
@@ -3467,7 +3452,7 @@ function Library._CreateSlider(tab, config)
 	local min = config.Min or 0
 	local max = config.Max or 100
 	local default = config.Default or 50
-	-- Evita división por cero si el usuario configura Min == Max.
+
 	local range = (max - min) ~= 0 and (max - min) or 1
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
@@ -3607,24 +3592,372 @@ function Library._CreateSlider(tab, config)
 	return methods
 end
 
+local function GetActionLabel(name)
+	local text = tostring(name or "A"):gsub("^%s+", ""):gsub("%s+$", "")
+	local parts = {}
+	for word in text:gmatch("%S+") do
+		parts[#parts + 1] = word
+	end
+	if #parts >= 2 then
+		return string.upper(string.sub(parts[1], 1, 1) .. string.sub(parts[2], 1, 1))
+	end
+	return string.upper(string.sub(text, 1, math.min(#text, 2)))
+end
+
+local function CreateInlineKeybindControl(lib, parent, keybind, onChanged)
+	local c = (lib and lib._c) or c
+	local currentKey = ResolveKeybindInput(keybind)
+	local listening = false
+	local previousKey = currentKey
+
+	local keyBox = CreateInstance("Frame", {
+		Name = "InlineKeybindBox",
+		BackgroundColor3 = c.Secondary,
+		BackgroundTransparency = 0.05,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0, 142, 0, 34),
+		Parent = parent,
+	})
+	CreateCorner(keyBox, 10)
+	CreateStroke(keyBox, c.Border, 0.35)
+
+	local icon = CreateInstance("ImageLabel", {
+		Name = "Icon",
+		Image = "",
+		ImageColor3 = c.TextDark,
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0, 14, 0.5, -8),
+		Size = UDim2.new(0, 16, 0, 16),
+		Parent = keyBox,
+	})
+	ApplyLucideIcon(icon, "key-round", "key", 48)
+
+	local label = CreateInstance("TextLabel", {
+		Name = "KeybindLabel",
+		FontFace = f.Regular,
+		TextColor3 = c.Text,
+		Text = "",
+		BackgroundTransparency = 1,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextSize = textsize.Small,
+		Position = UDim2.new(0, 38, 0, 0),
+		Size = UDim2.new(1, -66, 1, 0),
+		Parent = keyBox,
+	})
+
+	local clearButton = CreateInstance("ImageButton", {
+		Name = "ClearButton",
+		Image = "",
+		ImageColor3 = c.TextDark,
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.new(0, 14, 0, 14),
+		Parent = keyBox,
+	})
+	ApplyLucideIcon(clearButton, "x", "x", 48)
+
+	local button = CreateInstance("TextButton", {
+		Name = "Button",
+		Text = "",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, -30, 1, 0),
+		Parent = keyBox,
+	})
+
+	local function update()
+		label.Text = listening and "..." or FormatKeybindInput(currentKey)
+		if label.Text == "" then
+			label.Text = "Ninguno"
+		end
+		clearButton.Visible = listening or currentKey ~= Enum.KeyCode.Unknown
+	end
+
+	local function setListening(state)
+		listening = state == true
+		if lib then
+			if listening then
+				lib._capturingKeybind = true
+			else
+				task.defer(function()
+					lib._capturingKeybind = false
+				end)
+			end
+		end
+		update()
+	end
+
+	button.MouseButton1Click:Connect(function()
+		previousKey = currentKey
+		setListening(true)
+	end)
+
+	clearButton.MouseButton1Click:Connect(function()
+		if listening then
+			currentKey = previousKey
+			setListening(false)
+			return
+		end
+		currentKey = Enum.KeyCode.Unknown
+		update()
+		if type(onChanged) == "function" then
+			onChanged(currentKey)
+		end
+	end)
+
+	Track(
+		lib,
+		ui.InputBegan:Connect(function(input)
+			if not listening then
+				return
+			end
+			if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Escape then
+				currentKey = previousKey
+				setListening(false)
+				return
+			end
+			local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
+			local btnNum = tonumber(input.UserInputType.Name:match("^MouseButton(%d+)$"))
+			local isSideMouseBtn = btnNum ~= nil and btnNum > 3
+			if isKeyboard then
+				currentKey = input.KeyCode
+			elseif isSideMouseBtn then
+				currentKey = input.UserInputType
+			else
+				return
+			end
+			setListening(false)
+			if type(onChanged) == "function" then
+				onChanged(currentKey)
+			end
+		end)
+	)
+
+	button.MouseEnter:Connect(function()
+		CreateTween(keyBox, { BackgroundTransparency = 0.02 }, animationspeed.Fast)
+		CreateTween(icon, { ImageColor3 = c.Accent }, animationspeed.Fast)
+	end)
+	button.MouseLeave:Connect(function()
+		CreateTween(keyBox, { BackgroundTransparency = 0.08 }, animationspeed.Fast)
+		CreateTween(icon, { ImageColor3 = c.TextDark }, animationspeed.Fast)
+	end)
+
+	update()
+	return {
+		SetKey = function(_, key)
+			currentKey = ResolveKeybindInput(key)
+			update()
+		end,
+		GetKey = function()
+			return currentKey
+		end,
+	}
+end
+
+local function CreateInlineBubbleControl(lib, parent, config, onActivated)
+	local c = (lib and lib._c) or c
+	local enabled = config.Default == true
+	local floatingButton
+	local floatingGui
+	local labelText = config.Text or "Burbuja"
+	local bubbleText = config.BubbleText or GetActionLabel(config.Name)
+
+	local bubbleBox = CreateInstance("Frame", {
+		Name = "InlineBubbleBox",
+		BackgroundColor3 = c.Secondary,
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Size = UDim2.new(0, 118, 0, 32),
+		Parent = parent,
+	})
+	CreateCorner(bubbleBox, 16)
+	CreateStroke(bubbleBox, c.Border, 0.35)
+
+	local label = CreateInstance("TextLabel", {
+		Name = "BubbleLabel",
+		FontFace = f.Regular,
+		TextColor3 = c.Text,
+		Text = labelText,
+		BackgroundTransparency = 1,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextSize = textsize.Small,
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.new(1, -48, 1, 0),
+		Parent = bubbleBox,
+	})
+
+	local dot = CreateInstance("Frame", {
+		Name = "Dot",
+		BackgroundColor3 = enabled and c.Accent or c.Toggle.Disabled,
+		BorderSizePixel = 0,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -14, 0.5, 0),
+		Size = UDim2.new(0, 14, 0, 14),
+		Parent = bubbleBox,
+	})
+	CreateCorner(dot, 100)
+
+	local button = CreateInstance("TextButton", {
+		Name = "Button",
+		Text = "",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		Parent = bubbleBox,
+	})
+
+	local function updateFloatingVisual(active)
+		if not floatingButton then
+			return
+		end
+		floatingButton.BackgroundColor3 = active and c.Accent or c.Secondary
+		floatingButton.TextColor3 = active and c.Background or c.Text
+	end
+
+	local function ensureFloating()
+		if not enabled or not lib or not lib.screenGui then
+			return
+		end
+		if floatingGui and floatingGui.Parent then
+			return
+		end
+		floatingGui = CreateInstance("Frame", {
+			Name = "ActionBubble_" .. tostring(config.Name or "Action"),
+			BackgroundTransparency = 1,
+			Position = config.Position or UDim2.new(1, -84, 0.5, -22),
+			Size = UDim2.new(0, 46, 0, 46),
+			ZIndex = 9998,
+			Parent = lib.screenGui,
+		})
+
+		floatingButton = CreateInstance("TextButton", {
+			Name = "Button",
+			FontFace = f.Semi,
+			Text = bubbleText,
+			TextSize = textsize.Normal,
+			BackgroundColor3 = c.Secondary,
+			BackgroundTransparency = 0.05,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, 0, 1, 0),
+			ZIndex = 9999,
+			Parent = floatingGui,
+		})
+		CreateCorner(floatingButton, 100)
+		CreateStroke(floatingButton, c.Border, 0.25)
+
+		local dragging = false
+		local moved = false
+		local dragInput, dragStart, startPos
+		floatingButton.InputBegan:Connect(function(input)
+			if
+				input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch
+			then
+				dragging = true
+				moved = false
+				dragInput = input
+				dragStart = input.Position
+				startPos = floatingGui.Position
+			end
+		end)
+		floatingButton.InputEnded:Connect(function(input)
+			if input == dragInput then
+				dragging = false
+				dragInput = nil
+				if not moved and type(onActivated) == "function" then
+					onActivated()
+				end
+			end
+		end)
+		Track(
+			lib,
+			ui.InputChanged:Connect(function(input)
+				if
+					dragging
+					and (
+						input.UserInputType == Enum.UserInputType.MouseMovement
+						or input.UserInputType == Enum.UserInputType.Touch
+					)
+				then
+					local delta = input.Position - dragStart
+					if delta.Magnitude > 4 then
+						moved = true
+					end
+					floatingGui.Position = UDim2.new(
+						startPos.X.Scale,
+						startPos.X.Offset + delta.X,
+						startPos.Y.Scale,
+						startPos.Y.Offset + delta.Y
+					)
+				end
+			end)
+		)
+		Track(lib, floatingGui)
+	end
+
+	local methods = {}
+	function methods:SetEnabled(value)
+		enabled = value == true
+		dot.BackgroundColor3 = enabled and c.Accent or c.Toggle.Disabled
+		if enabled then
+			ensureFloating()
+		elseif floatingGui then
+			pcall(function()
+				floatingGui:Destroy()
+			end)
+			floatingGui = nil
+			floatingButton = nil
+		end
+	end
+	function methods:GetEnabled()
+		return enabled
+	end
+	function methods:SetActive(value)
+		updateFloatingVisual(value == true)
+	end
+
+	button.MouseButton1Click:Connect(function()
+		methods:SetEnabled(not enabled)
+	end)
+
+	methods:SetEnabled(enabled)
+	return methods
+end
+
 function Library._CreateButton(tab, config)
 	local c = (tab and tab._library and tab._library._c) or c
 	local name = config.Name or "Button"
 	local callback = config.Callback or function() end
-	local keybind = ResolveKeyCode(config.Keybind)
+	local keybind = ResolveKeybindInput(config.Keybind)
 	local keybindFlag = config.KeybindFlag or (config.Flag and (config.Flag .. "_keybind")) or nil
+	local bubbleFlag = config.BubbleFlag or (config.Flag and (config.Flag .. "_bubble")) or nil
 	local keybindId = nil
+	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown) or config.KeybindInline == true or config.Bubble == true
 
 	local frame = CreateInstance("Frame", {
 		Name = "Button_" .. name,
 		BackgroundColor3 = c.Secondary,
-		BackgroundTransparency = 0.18,
+		BackgroundTransparency = hasActionRow and 1 or 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, s.Button.Height),
+		Size = UDim2.new(1, 0, 0, hasActionRow and 86 or s.Button.Height),
 		Parent = tab.content,
 	})
 	CreateCorner(frame, 8)
-	CreateStroke(frame)
+	local frameStroke = CreateStroke(frame, c.Border, hasActionRow and 1 or 0.35)
+
+	local surface = frame
+	if hasActionRow then
+		surface = CreateInstance("Frame", {
+			Name = "ButtonCard",
+			BackgroundColor3 = c.Secondary,
+			BackgroundTransparency = 0.18,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, 0, 0, s.Button.Height),
+			Parent = frame,
+		})
+		CreateCorner(surface, 8)
+		CreateStroke(surface)
+	end
 
 	local nameLabel = CreateInstance("TextLabel", {
 		Name = "Name",
@@ -3635,8 +3968,8 @@ function Library._CreateButton(tab, config)
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0.5, -10),
 		TextSize = textsize.Normal,
-		Size = UDim2.new(0, 200, 0, 20),
-		Parent = frame,
+		Size = UDim2.new(1, hasActionRow and -58 or -86, 0, 20),
+		Parent = surface,
 	})
 
 	local icon = CreateInstance("ImageLabel", {
@@ -3646,7 +3979,8 @@ function Library._CreateButton(tab, config)
 		ImageColor3 = c.Text,
 		Position = UDim2.new(1, -30, 0.5, -10),
 		Size = UDim2.new(0, 20, 0, 20),
-		Parent = frame,
+		Visible = not hasActionRow,
+		Parent = surface,
 	})
 	ApplyLucideIcon(icon, config.Icon or "mouse-pointer-click", "mouse-pointer-click", 48)
 	CreateInstance("UIAspectRatioConstraint", {
@@ -3663,23 +3997,54 @@ function Library._CreateButton(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Right,
 		Position = UDim2.new(1, -70, 0.5, -10),
 		Size = UDim2.new(0, 60, 0, 20),
-		Visible = keybind ~= Enum.KeyCode.Unknown,
-		Parent = frame,
+		Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow,
+		Parent = surface,
 	})
-	icon.Visible = keybind == Enum.KeyCode.Unknown
+	icon.Visible = keybind == Enum.KeyCode.Unknown and not hasActionRow
 
 	local button = CreateInstance("TextButton", {
 		Name = "Button",
 		Text = "",
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 1, 0),
-		Parent = frame,
+		Parent = surface,
 	})
 
+	local actionRow
+	local keybindControl
+	local bubbleControl
+	if hasActionRow then
+		actionRow = CreateInstance("Frame", {
+			Name = "ActionRow",
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, 0, 0, 49),
+			Size = UDim2.new(1, -24, 0, 32),
+			Parent = frame,
+		})
+		CreateListLayout(actionRow, 10, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal)
+	end
+
+	local function RegisterOrUpdateKeybind()
+		keyLabel.Text = FormatKeyCode(keybind)
+		keyLabel.Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow
+		icon.Visible = keybind == Enum.KeyCode.Unknown and not hasActionRow
+		if keybindControl then
+			keybindControl:SetKey(keybind)
+		end
+		if keybindId and tab._library then
+			tab._library:_SetRegisteredKeybind(keybindId, keybind)
+		elseif keybind ~= Enum.KeyCode.Unknown and tab._library then
+			keybindId = "button_" .. name .. "_" .. tostring(tick())
+			tab._library:_RegisterKeybind(keybindId, keybind, function()
+				callback()
+			end)
+		end
+	end
+
 	button.MouseButton1Click:Connect(function()
-		CreateTween(frame, { BackgroundTransparency = 0.08 }, animationspeed.Fast)
+		CreateTween(surface, { BackgroundTransparency = 0.08 }, animationspeed.Fast)
 		task.wait(0.1)
-		CreateTween(frame, { BackgroundTransparency = 0.18 }, animationspeed.Fast)
+		CreateTween(surface, { BackgroundTransparency = 0.18 }, animationspeed.Fast)
 		callback()
 	end)
 
@@ -3688,29 +4053,41 @@ function Library._CreateButton(tab, config)
 			nameLabel.Text = text
 		end,
 		SetKeybind = function(_, keyCode)
-			keybind = ResolveKeyCode(keyCode)
-			keyLabel.Text = FormatKeyCode(keybind)
-			keyLabel.Visible = keybind ~= Enum.KeyCode.Unknown
-			icon.Visible = keybind == Enum.KeyCode.Unknown
-			if keybindId and tab._library then
-				tab._library:_SetRegisteredKeybind(keybindId, keybind)
-			elseif keybind ~= Enum.KeyCode.Unknown and tab._library then
-				keybindId = "button_" .. name .. "_" .. tostring(tick())
-				tab._library:_RegisterKeybind(keybindId, keybind, function()
-					callback()
-				end)
-			end
+			keybind = ResolveKeybindInput(keyCode)
+			RegisterOrUpdateKeybind()
 		end,
 		GetKeybind = function()
 			return keybind
 		end,
 	}
 
+	if actionRow then
+		if keybind ~= Enum.KeyCode.Unknown or config.KeybindInline == true then
+			keybindControl = CreateInlineKeybindControl(tab._library, actionRow, keybind, function(key)
+				methods:SetKeybind(key)
+			end)
+		end
+		if config.Bubble == true then
+			bubbleControl = CreateInlineBubbleControl(tab._library, actionRow, {
+				Name = name,
+				Text = config.BubbleLabel or "Burbuja",
+				BubbleText = config.BubbleText,
+				Default = config.BubbleDefault,
+				Position = config.BubblePosition,
+			}, function()
+				callback()
+			end)
+			methods.SetBubbleEnabled = function(_, value)
+				bubbleControl:SetEnabled(value)
+			end
+			methods.GetBubbleEnabled = function()
+				return bubbleControl:GetEnabled()
+			end
+		end
+	end
+
 	if keybind ~= Enum.KeyCode.Unknown and tab._library then
-		keybindId = "button_" .. name .. "_" .. tostring(tick())
-		tab._library:_RegisterKeybind(keybindId, keybind, function()
-			callback()
-		end)
+		RegisterOrUpdateKeybind()
 	end
 
 	if keybindFlag and tab._library then
@@ -3718,6 +4095,14 @@ function Library._CreateButton(tab, config)
 			return keybind
 		end, function(value)
 			methods:SetKeybind(value)
+		end)
+	end
+
+	if bubbleFlag and bubbleControl and tab._library then
+		tab._library:_RegisterConfigElement(bubbleFlag, "Toggle", function()
+			return bubbleControl:GetEnabled()
+		end, function(value)
+			bubbleControl:SetEnabled(value == true)
 		end)
 	end
 
@@ -3738,20 +4123,36 @@ function Library._CreateToggle(tab, config)
 	end
 	local flag = config.Flag
 	local enabled = default
-	local keybind = ResolveKeyCode(config.Keybind)
+	local keybind = ResolveKeybindInput(config.Keybind)
 	local keybindFlag = config.KeybindFlag or (flag and (flag .. "_keybind")) or nil
+	local bubbleFlag = config.BubbleFlag or (flag and (flag .. "_bubble")) or nil
 	local keybindId = nil
+	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown) or config.KeybindInline == true or config.Bubble == true
 
 	local frame = CreateInstance("Frame", {
 		Name = "Toggle_" .. name,
 		BackgroundColor3 = c.Secondary,
-		BackgroundTransparency = 0.18,
+		BackgroundTransparency = hasActionRow and 1 or 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, s.Button.Height),
+		Size = UDim2.new(1, 0, 0, hasActionRow and 86 or s.Button.Height),
 		Parent = tab.content,
 	})
 	CreateCorner(frame, 8)
-	CreateStroke(frame)
+	CreateStroke(frame, c.Border, hasActionRow and 1 or 0.35)
+
+	local surface = frame
+	if hasActionRow then
+		surface = CreateInstance("Frame", {
+			Name = "ToggleCard",
+			BackgroundColor3 = c.Secondary,
+			BackgroundTransparency = 0.18,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, 0, 0, s.Button.Height),
+			Parent = frame,
+		})
+		CreateCorner(surface, 8)
+		CreateStroke(surface)
+	end
 
 	local nameLabel = CreateInstance("TextLabel", {
 		Name = "Name",
@@ -3762,8 +4163,8 @@ function Library._CreateToggle(tab, config)
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0.5, -10),
 		TextSize = textsize.Normal,
-		Size = UDim2.new(0, 200, 0, 20),
-		Parent = frame,
+		Size = UDim2.new(1, -72, 0, 20),
+		Parent = surface,
 	})
 
 	local keyLabel = CreateInstance("TextLabel", {
@@ -3776,8 +4177,8 @@ function Library._CreateToggle(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Right,
 		Position = UDim2.new(1, -112, 0.5, -10),
 		Size = UDim2.new(0, 54, 0, 20),
-		Visible = keybind ~= Enum.KeyCode.Unknown,
-		Parent = frame,
+		Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow,
+		Parent = surface,
 	})
 
 	local switchBg = CreateInstance("Frame", {
@@ -3786,7 +4187,7 @@ function Library._CreateToggle(tab, config)
 		Position = UDim2.new(1, -52, 0.5, -10),
 		BorderSizePixel = 0,
 		Size = UDim2.new(0, s.Toggle.Width, 0, s.Toggle.Height),
-		Parent = frame,
+		Parent = surface,
 	})
 	switchBg:SetAttribute("Enabled", enabled == true)
 	CreateCorner(switchBg, 100)
@@ -3815,8 +4216,22 @@ function Library._CreateToggle(tab, config)
 		Text = "",
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 1, 0),
-		Parent = frame,
+		Parent = surface,
 	})
+
+	local actionRow
+	local keybindControl
+	local bubbleControl
+	if hasActionRow then
+		actionRow = CreateInstance("Frame", {
+			Name = "ActionRow",
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0, 0, 0, 49),
+			Size = UDim2.new(1, -24, 0, 32),
+			Parent = frame,
+		})
+		CreateListLayout(actionRow, 10, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal)
+	end
 
 	local function UpdateToggle()
 		switchBg:SetAttribute("Enabled", enabled == true)
@@ -3834,6 +4249,9 @@ function Library._CreateToggle(tab, config)
 				{ Position = UDim2.new(0, 4, 0.5, 0), BackgroundColor3 = c.Toggle.Circle },
 				animationspeed.Normal
 			)
+		end
+		if bubbleControl then
+			bubbleControl:SetActive(enabled)
 		end
 	end
 
@@ -3857,9 +4275,12 @@ function Library._CreateToggle(tab, config)
 			return enabled
 		end,
 		SetKeybind = function(_, keyCode)
-			keybind = ResolveKeyCode(keyCode)
+			keybind = ResolveKeybindInput(keyCode)
 			keyLabel.Text = FormatKeyCode(keybind)
-			keyLabel.Visible = keybind ~= Enum.KeyCode.Unknown
+			keyLabel.Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow
+			if keybindControl then
+				keybindControl:SetKey(keybind)
+			end
 			if keybindId and tab._library then
 				tab._library:_SetRegisteredKeybind(keybindId, keybind)
 			elseif keybind ~= Enum.KeyCode.Unknown and tab._library then
@@ -3871,6 +4292,30 @@ function Library._CreateToggle(tab, config)
 			return keybind
 		end,
 	}
+
+	if actionRow then
+		if keybind ~= Enum.KeyCode.Unknown or config.KeybindInline == true then
+			keybindControl = CreateInlineKeybindControl(tab._library, actionRow, keybind, function(key)
+				methods:SetKeybind(key)
+			end)
+		end
+		if config.Bubble == true then
+			bubbleControl = CreateInlineBubbleControl(tab._library, actionRow, {
+				Name = name,
+				Text = config.BubbleLabel or "Burbuja",
+				BubbleText = config.BubbleText,
+				Default = config.BubbleDefault,
+				Position = config.BubblePosition,
+			}, ToggleValue)
+			bubbleControl:SetActive(enabled)
+			methods.SetBubbleEnabled = function(_, value)
+				bubbleControl:SetEnabled(value)
+			end
+			methods.GetBubbleEnabled = function()
+				return bubbleControl:GetEnabled()
+			end
+		end
+	end
 
 	if flag and tab._library then
 		tab._library:_RegisterConfigElement(flag, "Toggle", function()
@@ -3890,6 +4335,14 @@ function Library._CreateToggle(tab, config)
 			return keybind
 		end, function(value)
 			methods:SetKeybind(value)
+		end)
+	end
+
+	if bubbleFlag and bubbleControl and tab._library then
+		tab._library:_RegisterConfigElement(bubbleFlag, "Toggle", function()
+			return bubbleControl:GetEnabled()
+		end, function(value)
+			bubbleControl:SetEnabled(value == true)
 		end)
 	end
 
@@ -3913,11 +4366,10 @@ function Library._CreateDropdown(tab, config)
 	local flag = config.Flag
 	local selected = multiSelect and {} or default
 	local expanded = false
-	-- Forward declarations: CreateOptionButton (definido más abajo) las usa en
-	-- su closure de click, por eso deben declararse antes.
+
 	local dropScrollConn, dropInputConn
 	local CloseDropdown
-	-- Coordinación "un solo dropdown abierto" POR INSTANCIA (no global).
+
 	local activeHolder = _lib or Library
 
 	if multiSelect and type(default) == "table" then
@@ -4212,7 +4664,6 @@ function Library._CreateDropdown(tab, config)
 	local methods = {
 		SetValue = function(_, value)
 			if multiSelect and type(value) == "table" then
-				-- Copia defensiva: no mutar la tabla que pasa el caller.
 				selected = {}
 				for _, v in ipairs(value) do
 					table.insert(selected, v)
@@ -4238,7 +4689,6 @@ function Library._CreateDropdown(tab, config)
 				CreateOptionButton(option)
 			end
 
-			-- Descartar selecciones que ya no existen en las nuevas opciones.
 			if multiSelect then
 				local pruned = {}
 				for _, value in ipairs(selected) do
@@ -4398,9 +4848,6 @@ function Library._CreateKeybind(tab, config, lib)
 
 	UpdateKeyDisplay()
 
-	-- Sincroniza el flag de captura de la ventana. Al apagar usamos task.defer
-	-- para que el listener global (que corre en el mismo InputBegan) todavía vea
-	-- la captura activa y no dispare toggle/otros keybinds con esa misma tecla.
 	local function setListening(state)
 		listening = state
 		if lib then
@@ -4731,7 +5178,7 @@ function Library._CreateColorPicker(tab, config)
 
 	local pickerScrollConn, pickerInputConn
 	local ClosePicker
-	-- Coordinación "un solo color picker abierto" POR INSTANCIA (no global).
+
 	local activeHolder = _lib or Library
 
 	local function UpdatePickerPosition()
