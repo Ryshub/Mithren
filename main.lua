@@ -3618,7 +3618,7 @@ local function CreateInlineKeybindControl(lib, parent, keybind, onChanged)
 		Size = UDim2.new(0, 142, 0, 34),
 		Parent = parent,
 	})
-	CreateCorner(keyBox, 10)
+	CreateCorner(keyBox, 8)
 	CreateStroke(keyBox, c.Border, 0.35)
 
 	local icon = CreateInstance("ImageLabel", {
@@ -3768,10 +3768,10 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
-		Size = UDim2.new(0, 118, 0, 32),
+		Size = UDim2.new(0, 118, 0, 34),
 		Parent = parent,
 	})
-	CreateCorner(bubbleBox, 16)
+	CreateCorner(bubbleBox, 8)
 	CreateStroke(bubbleBox, c.Border, 0.35)
 
 	local label = CreateInstance("TextLabel", {
