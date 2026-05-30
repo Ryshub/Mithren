@@ -121,6 +121,7 @@ local SerializeConfigValue, DeserializeConfigValue
 local LucideModule = nil
 local LucideIconObjects = {}
 local LucideFallbackConnections = {}
+local LucideIconsUrl = "https://raw.githubusercontent.com/Footagesus/Icons/main/Main-v2.lua"
 
 local LucideAliases = {
 	close = "x",
@@ -197,6 +198,13 @@ local function NormalizeLucideIconName(iconName)
 	end
 
 	name = name:gsub("_", "-"):gsub("%s+", "-"):lower()
+	local iconPack, packedName = name:match("^([%w%-]+):(.+)$")
+	if iconPack then
+		if iconPack ~= "lucide" then
+			return nil
+		end
+		name = packedName
+	end
 	return LucideAliases[name] or name
 end
 
@@ -225,6 +233,35 @@ local function GetLucideModule()
 		local replicatedStorage = game:GetService("ReplicatedStorage")
 		local candidate = replicatedStorage:FindFirstChild("Lucide")
 		return candidate and require(candidate) or nil
+	end)
+	if ok and module then
+		LucideModule = module
+		if type(LucideModule.SetIconsType) == "function" then
+			pcall(function()
+				LucideModule.SetIconsType("lucide")
+			end)
+		end
+		return LucideModule
+	end
+
+	ok, module = pcall(function()
+		local sourceOk, source = pcall(function()
+			return game:HttpGetAsync(LucideIconsUrl)
+		end)
+		if not sourceOk or type(source) ~= "string" or source == "" then
+			sourceOk, source = pcall(function()
+				return game:HttpGet(LucideIconsUrl)
+			end)
+		end
+		if not sourceOk or type(source) ~= "string" or source == "" then
+			sourceOk, source = pcall(function()
+				return hs:GetAsync(LucideIconsUrl)
+			end)
+		end
+		if not sourceOk or type(source) ~= "string" or source == "" then
+			return nil
+		end
+		return source and loadstring(source)() or nil
 	end)
 	if ok and module then
 		LucideModule = module
@@ -460,6 +497,41 @@ local function CreateLucideFallback(imageObject, iconName)
 		DrawLucideDot(holder, 0.35, 0.42)
 		DrawLucideDot(holder, 0.5, 0.34)
 		DrawLucideDot(holder, 0.64, 0.45)
+	elseif name == "crosshair" then
+		DrawLucideCircle(holder, 0.5, 0.5, 0.58)
+		DrawLucideLine(holder, 0.5, 0.18, 0.2, 2, 90)
+		DrawLucideLine(holder, 0.5, 0.82, 0.2, 2, 90)
+		DrawLucideLine(holder, 0.18, 0.5, 0.2, 2, 0)
+		DrawLucideLine(holder, 0.82, 0.5, 0.2, 2, 0)
+		DrawLucideDot(holder, 0.5, 0.5)
+	elseif name == "eye" then
+		DrawLucideLine(holder, 0.36, 0.5, 0.42, 2, 28)
+		DrawLucideLine(holder, 0.64, 0.5, 0.42, 2, -28)
+		DrawLucideLine(holder, 0.36, 0.5, 0.42, 2, -28)
+		DrawLucideLine(holder, 0.64, 0.5, 0.42, 2, 28)
+		DrawLucideCircle(holder, 0.5, 0.5, 0.22)
+	elseif name == "scan" then
+		DrawLucideLine(holder, 0.3, 0.22, 0.28, 2, 0)
+		DrawLucideLine(holder, 0.22, 0.3, 0.28, 2, 90)
+		DrawLucideLine(holder, 0.7, 0.22, 0.28, 2, 0)
+		DrawLucideLine(holder, 0.78, 0.3, 0.28, 2, 90)
+		DrawLucideLine(holder, 0.3, 0.78, 0.28, 2, 0)
+		DrawLucideLine(holder, 0.22, 0.7, 0.28, 2, 90)
+		DrawLucideLine(holder, 0.7, 0.78, 0.28, 2, 0)
+		DrawLucideLine(holder, 0.78, 0.7, 0.28, 2, 90)
+	elseif name == "sparkles" then
+		DrawLucideLine(holder, 0.42, 0.42, 0.45, 2, 0)
+		DrawLucideLine(holder, 0.42, 0.42, 0.45, 2, 90)
+		DrawLucideLine(holder, 0.42, 0.42, 0.36, 2, 45)
+		DrawLucideLine(holder, 0.42, 0.42, 0.36, 2, -45)
+		DrawLucideLine(holder, 0.72, 0.72, 0.24, 2, 0)
+		DrawLucideLine(holder, 0.72, 0.72, 0.24, 2, 90)
+	elseif name == "keyboard" then
+		DrawLucideRect(holder, 0.5, 0.5, 0.82, 0.56)
+		for _, x in ipairs({ 0.32, 0.44, 0.56, 0.68 }) do
+			DrawLucideDot(holder, x, 0.42)
+		end
+		DrawLucideLine(holder, 0.5, 0.62, 0.42, 2, 0)
 	elseif name == "type" then
 		DrawLucideLine(holder, 0.5, 0.28, 0.8, 2, 0)
 		DrawLucideLine(holder, 0.5, 0.55, 0.62, 2, 90)
@@ -508,13 +580,11 @@ local function ApplyLucideIcon(imageObject, iconName, fallbackName, iconSize, sk
 	imageObject.ImageRectSize = Vector2.new(0, 0)
 
 	local asset
-	if not Library.MonochromeIcons then
-		asset = ReadLucideIconAsset(GetLucideModule(), resolvedName, iconSize)
-		if not asset and resolvedName ~= NormalizeLucideIconName(fallbackName) then
-			asset = ReadLucideIconAsset(GetLucideModule(), NormalizeLucideIconName(fallbackName), iconSize)
-		end
+	asset = ReadLucideIconAsset(GetLucideModule(), resolvedName, iconSize)
+	if not asset and resolvedName ~= NormalizeLucideIconName(fallbackName) then
+		asset = ReadLucideIconAsset(GetLucideModule(), NormalizeLucideIconName(fallbackName), iconSize)
 	end
-	if Library.MonochromeIcons or not asset or type(asset.Image) ~= "string" or asset.Image == "" then
+	if not asset or type(asset.Image) ~= "string" or asset.Image == "" then
 		return CreateLucideFallback(imageObject, resolvedName)
 	end
 
@@ -1614,8 +1684,8 @@ function Library:_CreateMainv0rtexd()
 		FontFace = f.Regular,
 		TextColor3 = c.Text,
 		Text = self.versionTag and tostring(self.versionTag) or "",
-		BackgroundColor3 = c.Accent,
-		BackgroundTransparency = 0.2,
+		BackgroundColor3 = c.Secondary,
+		BackgroundTransparency = self._elementTransparency,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextSize = textsize.Tiny,
 		AutomaticSize = Enum.AutomaticSize.X,
@@ -2229,10 +2299,6 @@ function Library:SetAccentColor(color)
 	c.Notification.Timer = color
 	self._theme.AccentColor = color
 
-	if self.versionTagLabel then
-		self.versionTagLabel.BackgroundColor3 = color
-	end
-
 	self:_RefreshCurrentTabStyle()
 	task.delay(animationspeed.Fast + 0.03, function()
 		self:_RefreshCurrentTabStyle()
@@ -2404,8 +2470,8 @@ function Library:SetTheme(theme)
 					obj.TextColor3 = c.Text
 				end
 				if obj.Name == "VersionTag" then
-					obj.BackgroundColor3 = c.Accent
-					obj.BackgroundTransparency = 0.2
+					obj.BackgroundColor3 = c.Secondary
+					obj.BackgroundTransparency = self._elementTransparency
 				end
 			elseif obj:IsA("ImageLabel") or obj:IsA("ImageButton") then
 				if obj.Name == "Resize" then
@@ -3039,7 +3105,7 @@ function Library._CreateTab(section, name, icon)
 		ImageColor3 = c.TextDark,
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 12, 0.5, 0),
-		Size = UDim2.new(0, 15, 0, 15),
+		Size = UDim2.new(0, 16, 0, 16),
 		Parent = tabBtn,
 	})
 	ApplyLucideIcon(iconLabel, icon, "app-window", 48)
