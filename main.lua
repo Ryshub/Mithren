@@ -4059,6 +4059,21 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 	return methods
 end
 
+local function FitInlineActionControls(row)
+	local controls = {}
+	for _, child in ipairs(row:GetChildren()) do
+		if child:IsA("GuiObject") then
+			controls[#controls + 1] = child
+		end
+	end
+	local count = math.max(1, math.min(#controls, 4))
+	local gap = 10
+	local offset = -math.ceil((gap * (count - 1)) / count)
+	for _, child in ipairs(controls) do
+		child.Size = UDim2.new(1 / count, offset, 0, 34)
+	end
+end
+
 function Library._CreateButton(tab, config)
 	local c = (tab and tab._library and tab._library._c) or c
 	local name = config.Name or "Button"
@@ -4067,7 +4082,10 @@ function Library._CreateButton(tab, config)
 	local keybindFlag = config.KeybindFlag or (config.Flag and (config.Flag .. "_keybind")) or nil
 	local bubbleFlag = config.BubbleFlag or (config.Flag and (config.Flag .. "_bubble")) or nil
 	local keybindId = nil
-	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown) or config.KeybindInline == true or config.Bubble == true
+	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown)
+		or config.KeybindInline == true
+		or config.Bubble == true
+		or config.ColorPicker ~= nil
 
 	local frame = CreateInstance("Frame", {
 		Name = "Button_" .. name,
@@ -4148,6 +4166,7 @@ function Library._CreateButton(tab, config)
 	local actionRow
 	local keybindControl
 	local bubbleControl
+	local inlineColorControl
 	if hasActionRow then
 		actionRow = CreateInstance("Frame", {
 			Name = "ActionRow",
@@ -4219,6 +4238,20 @@ function Library._CreateButton(tab, config)
 				return bubbleControl:GetEnabled()
 			end
 		end
+		if config.ColorPicker ~= nil then
+			local colorConfig = type(config.ColorPicker) == "table" and shallowCopyConfig(config.ColorPicker) or {}
+			colorConfig.Name = colorConfig.Name or "Color"
+			colorConfig.Compact = true
+			colorConfig.Parent = actionRow
+			inlineColorControl = Library._CreateColorPicker(tab, colorConfig)
+			methods.SetColor = function(_, value)
+				inlineColorControl:SetColor(value)
+			end
+			methods.GetColor = function()
+				return inlineColorControl:GetColor()
+			end
+		end
+		FitInlineActionControls(actionRow)
 	end
 
 	if keybind ~= Enum.KeyCode.Unknown and tab._library then
@@ -4262,7 +4295,10 @@ function Library._CreateToggle(tab, config)
 	local keybindFlag = config.KeybindFlag or (flag and (flag .. "_keybind")) or nil
 	local bubbleFlag = config.BubbleFlag or (flag and (flag .. "_bubble")) or nil
 	local keybindId = nil
-	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown) or config.KeybindInline == true or config.Bubble == true
+	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown)
+		or config.KeybindInline == true
+		or config.Bubble == true
+		or config.ColorPicker ~= nil
 
 	local frame = CreateInstance("Frame", {
 		Name = "Toggle_" .. name,
@@ -4357,6 +4393,7 @@ function Library._CreateToggle(tab, config)
 	local actionRow
 	local keybindControl
 	local bubbleControl
+	local inlineColorControl
 	if hasActionRow then
 		actionRow = CreateInstance("Frame", {
 			Name = "ActionRow",
@@ -4450,6 +4487,20 @@ function Library._CreateToggle(tab, config)
 				return bubbleControl:GetEnabled()
 			end
 		end
+		if config.ColorPicker ~= nil then
+			local colorConfig = type(config.ColorPicker) == "table" and shallowCopyConfig(config.ColorPicker) or {}
+			colorConfig.Name = colorConfig.Name or "Color"
+			colorConfig.Compact = true
+			colorConfig.Parent = actionRow
+			inlineColorControl = Library._CreateColorPicker(tab, colorConfig)
+			methods.SetColor = function(_, value)
+				inlineColorControl:SetColor(value)
+			end
+			methods.GetColor = function()
+				return inlineColorControl:GetColor()
+			end
+		end
+		FitInlineActionControls(actionRow)
 	end
 
 	if flag and tab._library then
@@ -5086,6 +5137,7 @@ function Library._CreateColorPicker(tab, config)
 	local hue, sat, val = currentColor:ToHSV()
 	local expanded = false
 	local compact = config.Compact == true
+	local parent = config.Parent or tab.content
 
 	local frame = CreateInstance("Frame", {
 		Name = "ColorPicker_" .. name,
@@ -5093,7 +5145,7 @@ function Library._CreateColorPicker(tab, config)
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
 		Size = compact and UDim2.new(0, 118, 0, 34) or UDim2.new(1, 0, 0, s.Button.Height),
-		Parent = tab.content,
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
 	CreateStroke(frame)
@@ -5116,19 +5168,19 @@ function Library._CreateColorPicker(tab, config)
 		BackgroundColor3 = currentColor,
 		AnchorPoint = compact and Vector2.new(1, 0.5) or Vector2.new(0, 0),
 		Position = compact and UDim2.new(1, -14, 0.5, 0) or UDim2.new(1, -48, 0.5, -9),
-		Size = compact and UDim2.new(0, 14, 0, 14) or UDim2.new(0, 38, 0, 18),
+		Size = compact and UDim2.new(0, 22, 0, 14) or UDim2.new(0, 38, 0, 18),
 		ZIndex = 2,
 		Parent = frame,
 	})
-	CreateCorner(colorPreview, compact and 100 or 6)
+	CreateCorner(colorPreview, compact and 4 or 6)
 	CreateStroke(colorPreview)
 
 	local previewBtn = CreateInstance("TextButton", {
 		Text = "",
 		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 1, 0),
+		Size = compact and UDim2.new(1, 0, 1, 0) or UDim2.new(1, 0, 1, 0),
 		ZIndex = 3,
-		Parent = colorPreview,
+		Parent = compact and frame or colorPreview,
 	})
 
 	local pickerContainer = CreateInstance("Frame", {
