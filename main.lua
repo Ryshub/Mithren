@@ -674,6 +674,41 @@ local function CreateListLayout(parent, padding, sortOrder, direction)
 	})
 end
 
+local function ResolveElementParent(tab, config)
+	config = type(config) == "table" and config or {}
+	return config.Parent or (tab and tab.content)
+end
+
+local function IsComponentRowParent(parent)
+	return parent and parent:GetAttribute("MithrenComponentRow") == true
+end
+
+local function GetComponentRowColumns(parent)
+	if not IsComponentRowParent(parent) then
+		return 1
+	end
+	return tonumber(parent:GetAttribute("MithrenComponentRowColumns")) or 1
+end
+
+local function ResolveElementSize(config, parent, height)
+	config = type(config) == "table" and config or {}
+	if config.WidthScale then
+		return UDim2.new(config.WidthScale, config.WidthOffset or 0, 0, height)
+	end
+	if IsComponentRowParent(parent) then
+		return UDim2.new(1, 0, 0, height)
+	end
+	return UDim2.new(1, 0, 0, height)
+end
+
+local function IsCompactElement(config, parent)
+	return (type(config) == "table" and config.Compact == true) or IsComponentRowParent(parent)
+end
+
+local function IsDenseCompactElement(config, parent)
+	return IsCompactElement(config, parent) and GetComponentRowColumns(parent) >= 3
+end
+
 local function IsMobileDevice()
 	return ui.TouchEnabled and not ui.KeyboardEnabled
 end
@@ -1210,6 +1245,19 @@ function Library.new(title, configFolder, config)
 			if success and type(data) == "table" and data.__theme then
 				self:SetTheme(DeserializeConfigValue(data.__theme))
 			end
+			if success and type(data) == "table" and data.__window then
+				local windowState = DeserializeConfigValue(data.__window)
+				if type(windowState) == "table" then
+					local width = tonumber(windowState.Width or windowState.width)
+					local height = tonumber(windowState.Height or windowState.height)
+					if width and height then
+						width = math.clamp(width, self._minSize.X, self._maxSize.X)
+						height = math.clamp(height, self._minSize.Y, self._maxSize.Y)
+						self._windowSize = Vector2.new(width, height)
+						self._originalHeight = height
+					end
+				end
+			end
 		end
 	end
 	self:_CreateMainv0rtexd()
@@ -1643,6 +1691,7 @@ function Library:_CreateMainv0rtexd()
 		BorderSizePixel = 0,
 		Size = UDim2.new(0, windowWidth, 0, windowHeight),
 		ClipsDescendants = false,
+		Active = true,
 		Parent = self.screenGui,
 	})
 	CreateCorner(self.container, 12)
@@ -1673,6 +1722,18 @@ function Library:_CreateMainv0rtexd()
 		Parent = self.container,
 	})
 	CreateCorner(self.backgroundDim, 12)
+
+	self.inputBlocker = CreateInstance("TextButton", {
+		Name = "InputBlocker",
+		Text = "",
+		AutoButtonColor = false,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 1, 0),
+		Active = true,
+		ZIndex = 1,
+		Parent = self.container,
+	})
 
 	self.topBar = CreateInstance("Frame", {
 		Name = "TopBar",
@@ -2461,21 +2522,16 @@ function Library:SetTheme(theme)
 				elseif name == "PickerContainer" then
 					obj.BackgroundColor3 = c.Secondary
 					obj.BackgroundTransparency = 0.02
-				elseif (name:match("^Toggle_") or name:match("^Button_")) and obj:FindFirstChild("ActionRow") then
-					obj.BackgroundTransparency = 1
 				elseif
 					name:match("^Paragraph")
 					or name:match("^Slider_")
 					or name:match("^Toggle_")
 					or name:match("^Button_")
-					or name == "ToggleCard"
-					or name == "ButtonCard"
 					or name:match("^Dropdown_")
 					or name:match("^TextBox_")
 					or name:match("^ColorPicker_")
 					or name:match("^Keybind_")
-					or name == "InlineKeybindBox"
-					or name == "InlineBubbleBox"
+					or name:match("^Bubble_")
 					or name == "SelectedDisplay"
 					or name == "TextBoxContainer"
 					or name == "LanguageSelect"
@@ -2594,6 +2650,42 @@ function Library:GetTheme()
 	return CloneTheme(self._theme)
 end
 
+function Library:_GetWindowState()
+	if not self.container then
+		return nil
+	end
+	local width = tonumber(self.container.Size.X.Offset)
+	local height = tonumber((self.minimized and self._originalHeight) or self.container.Size.Y.Offset)
+	if not width or not height then
+		return nil
+	end
+	return {
+		Width = math.floor(width + 0.5),
+		Height = math.floor(height + 0.5),
+	}
+end
+
+function Library:_ApplyWindowState(state)
+	if type(state) ~= "table" or not self.container then
+		return
+	end
+	local width = tonumber(state.Width or state.width)
+	local height = tonumber(state.Height or state.height)
+	if not width or not height then
+		return
+	end
+	local metrics = GetResponsiveWindowMetrics()
+	self._minSize = metrics.Min
+	self._maxSize = metrics.Max
+	width = math.clamp(width, self._minSize.X, self._maxSize.X)
+	height = math.clamp(height, self._minSize.Y, self._maxSize.Y)
+	self._windowSize = Vector2.new(width, height)
+	self._originalHeight = height
+	if not self.minimized then
+		self.container.Size = UDim2.new(0, width, 0, height)
+	end
+end
+
 function Library:ResetTheme()
 	self:SetTheme({
 		AccentColor = Color3.fromRGB(255, 255, 255),
@@ -2686,6 +2778,7 @@ function Library:_SetupSmartResize(handle)
 			connection = input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					resizing = false
+					self:SaveConfig("__session", true)
 					CreateTween(handle, { ImageColor3 = c.Accent }, animationspeed.Fast)
 					if connection then
 						connection:Disconnect()
@@ -2829,7 +2922,10 @@ function Library:SaveConfig(configName, silent)
 
 	EnsureConfigFolder(self.configFolder)
 
-	local configData = { __theme = SerializeConfigValue(self:GetTheme()) }
+	local configData = {
+		__theme = SerializeConfigValue(self:GetTheme()),
+		__window = SerializeConfigValue(self:_GetWindowState()),
+	}
 	for id, element in pairs(self._configElements) do
 		configData[id] = SerializeConfigValue(element.getValue())
 	end
@@ -2892,8 +2988,12 @@ function Library:LoadConfig(configName, silent)
 		self:SetTheme(DeserializeConfigValue(data.__theme))
 	end
 
+	if data.__window then
+		self:_ApplyWindowState(DeserializeConfigValue(data.__window))
+	end
+
 	for id, value in pairs(data) do
-		if id ~= "__theme" and self._configElements[id] then
+		if id ~= "__theme" and id ~= "__window" and self._configElements[id] then
 			pcall(function()
 				self._configElements[id].setValue(DeserializeConfigValue(value))
 			end)
@@ -3250,6 +3350,10 @@ function Library._CreateTab(section, name, icon)
 		return Library._CreateDivider(self, config)
 	end
 
+	function tabMethods:CreateRow(config)
+		return Library._CreateRow(self, config)
+	end
+
 	function tabMethods:CreateSlider(config)
 		return Library._CreateSlider(self, config)
 	end
@@ -3274,6 +3378,10 @@ function Library._CreateTab(section, name, icon)
 		return Library._CreateColorPicker(self, config)
 	end
 
+	function tabMethods:CreateBubble(config)
+		return Library._CreateBubble(self, config)
+	end
+
 	function tabMethods:CreateTextBox(config)
 		return Library._CreateTextBox(self, config)
 	end
@@ -3295,6 +3403,10 @@ function Library._CreateTab(section, name, icon)
 
 	function tabMethods:Divider(name)
 		return self:CreateDivider(name)
+	end
+
+	function tabMethods:Row(config)
+		return self:CreateRow(config)
 	end
 
 	function tabMethods:Button(name, callback)
@@ -3386,6 +3498,13 @@ function Library._CreateTab(section, name, icon)
 			return self:CreateColorPicker(name)
 		end
 		return self:CreateColorPicker({ Name = name, Default = default, Callback = callback })
+	end
+
+	function tabMethods:Bubble(name, default, activated)
+		if type(name) == "table" then
+			return self:CreateBubble(name)
+		end
+		return self:CreateBubble({ Name = name, Default = default, Activated = activated })
 	end
 
 	function tabMethods:ConfigSection(config)
@@ -3519,19 +3638,186 @@ function Library._CreateDivider(tab, config)
 	}
 end
 
+function Library._CreateRow(tab, config)
+	local rowConfig = {}
+	if type(config) == "number" then
+		rowConfig.Columns = config
+	elseif type(config) == "table" then
+		rowConfig = shallowCopyConfig(config)
+	end
+
+	local columns = math.clamp(math.floor(tonumber(rowConfig.Columns or rowConfig.Count or 2) or 2), 1, 3)
+	local gap = math.max(0, tonumber(rowConfig.Gap or 8) or 8)
+	local widthOffset = -((gap * (columns - 1)) / columns)
+
+	local rowFrame = CreateInstance("Frame", {
+		Name = "ComponentRow",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Parent = tab.content,
+	})
+	rowFrame:SetAttribute("MithrenComponentRow", true)
+	rowFrame:SetAttribute("MithrenComponentRowColumns", columns)
+
+	local layout = CreateListLayout(rowFrame, gap, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal)
+	layout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+	local function syncRowHeight()
+		rowFrame.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y)
+	end
+	Track(tab._library, layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(syncRowHeight))
+	task.defer(syncRowHeight)
+
+	local function prepareConfig(itemConfig)
+		local nextConfig = type(itemConfig) == "table" and shallowCopyConfig(itemConfig) or { Name = tostring(itemConfig or "") }
+		nextConfig.Parent = rowFrame
+		nextConfig.WidthScale = 1 / columns
+		nextConfig.WidthOffset = widthOffset
+		if nextConfig.Compact == nil then
+			nextConfig.Compact = true
+		end
+		return nextConfig
+	end
+
+	local rowMethods = {
+		Frame = rowFrame,
+		Columns = columns,
+	}
+
+	function rowMethods:CreateButton(itemConfig)
+		return Library._CreateButton(tab, prepareConfig(itemConfig))
+	end
+
+	function rowMethods:CreateToggle(itemConfig)
+		return Library._CreateToggle(tab, prepareConfig(itemConfig))
+	end
+
+	function rowMethods:CreateSlider(itemConfig)
+		return Library._CreateSlider(tab, prepareConfig(itemConfig))
+	end
+
+	function rowMethods:CreateDropdown(itemConfig)
+		return Library._CreateDropdown(tab, prepareConfig(itemConfig))
+	end
+
+	function rowMethods:CreateKeybind(itemConfig)
+		return Library._CreateKeybind(tab, prepareConfig(itemConfig), tab._library)
+	end
+
+	function rowMethods:CreateColorPicker(itemConfig)
+		return Library._CreateColorPicker(tab, prepareConfig(itemConfig))
+	end
+
+	function rowMethods:CreateBubble(itemConfig)
+		return Library._CreateBubble(tab, prepareConfig(itemConfig))
+	end
+
+	function rowMethods:CreateTextBox(itemConfig)
+		return Library._CreateTextBox(tab, prepareConfig(itemConfig))
+	end
+
+	function rowMethods:Button(name, callback)
+		if type(name) == "table" then
+			return self:CreateButton(name)
+		end
+		return self:CreateButton({ Name = name, Callback = callback })
+	end
+
+	function rowMethods:Toggle(name, default, callback)
+		if type(name) == "table" then
+			return self:CreateToggle(name)
+		end
+		return self:CreateToggle({ Name = name, Default = default, Callback = callback })
+	end
+
+	function rowMethods:Slider(name, min, max, default, callback)
+		if type(name) == "table" then
+			return self:CreateSlider(name)
+		end
+		return self:CreateSlider({ Name = name, Min = min, Max = max, Default = default, Callback = callback })
+	end
+
+	function rowMethods:Dropdown(name, options, default, callback)
+		if type(name) == "table" then
+			return self:CreateDropdown(name)
+		end
+		return self:CreateDropdown({ Name = name, Options = options, Default = default, Callback = callback })
+	end
+
+	function rowMethods:Keybind(name, default, callback)
+		if type(name) == "table" then
+			return self:CreateKeybind(name)
+		end
+		return self:CreateKeybind({ Name = name, Default = default, Callback = callback })
+	end
+
+	function rowMethods:ColorPicker(name, default, callback)
+		if type(name) == "table" then
+			return self:CreateColorPicker(name)
+		end
+		return self:CreateColorPicker({ Name = name, Default = default, Callback = callback })
+	end
+
+	function rowMethods:Bubble(name, default, activated)
+		if type(name) == "table" then
+			return self:CreateBubble(name)
+		end
+		return self:CreateBubble({ Name = name, Default = default, Activated = activated })
+	end
+
+	function rowMethods:TextBox(name, placeholder, default, callback)
+		if type(name) == "table" then
+			return self:CreateTextBox(name)
+		end
+		return self:CreateTextBox({ Name = name, Placeholder = placeholder, Default = default, Callback = callback })
+	end
+
+	if type(rowConfig.Elements) == "table" then
+		for _, element in ipairs(rowConfig.Elements) do
+			if type(element) == "table" then
+				local elementType = tostring(element.Type or element.Kind or "")
+				element.Type = nil
+				element.Kind = nil
+				if elementType == "Toggle" then
+					rowMethods:CreateToggle(element)
+				elseif elementType == "Slider" then
+					rowMethods:CreateSlider(element)
+				elseif elementType == "Dropdown" then
+					rowMethods:CreateDropdown(element)
+				elseif elementType == "Keybind" then
+					rowMethods:CreateKeybind(element)
+				elseif elementType == "ColorPicker" or elementType == "Color" then
+					rowMethods:CreateColorPicker(element)
+				elseif elementType == "Bubble" then
+					rowMethods:CreateBubble(element)
+				elseif elementType == "TextBox" or elementType == "Input" then
+					rowMethods:CreateTextBox(element)
+				else
+					rowMethods:CreateButton(element)
+				end
+			end
+		end
+	end
+
+	return rowMethods
+end
+
 function Library._CreateParagraph(tab, config)
 	local c = (tab and tab._library and tab._library._c) or c
 	local title = config.Title or "Paragraph"
 	local content = config.Content or "Description text here."
+	local parent = ResolveElementParent(tab, config)
 
 	local frame = CreateInstance("Frame", {
 		Name = "Paragraph",
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, 0),
+		Size = ResolveElementSize(config, parent, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		Parent = tab.content,
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
 	CreateStroke(frame)
@@ -3580,6 +3866,9 @@ function Library._CreateSlider(tab, config)
 	local min = config.Min or 0
 	local max = config.Max or 100
 	local default = config.Default or 50
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
+	local dense = IsDenseCompactElement(config, parent)
 
 	local range = (max - min) ~= 0 and (max - min) or 1
 	local _lib = tab and tab._library
@@ -3598,8 +3887,8 @@ function Library._CreateSlider(tab, config)
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, s.Slider.Height),
-		Parent = tab.content,
+		Size = ResolveElementSize(config, parent, compact and s.Button.Height or s.Slider.Height),
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
 	CreateStroke(frame)
@@ -3612,8 +3901,9 @@ function Library._CreateSlider(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0, 5),
-		TextSize = textsize.Normal,
-		Size = UDim2.new(0, 200, 0, 20),
+		TextSize = compact and textsize.Small or textsize.Normal,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Size = UDim2.new(1, dense and -58 or -72, 0, 20),
 		Parent = frame,
 	})
 
@@ -3625,7 +3915,7 @@ function Library._CreateSlider(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Right,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(1, -60, 0, 5),
-		TextSize = textsize.Normal,
+		TextSize = compact and textsize.Small or textsize.Normal,
 		Size = UDim2.new(0, 50, 0, 20),
 		Parent = frame,
 	})
@@ -3633,9 +3923,9 @@ function Library._CreateSlider(tab, config)
 	local sliderBg = CreateInstance("Frame", {
 		Name = "SliderBackground",
 		BackgroundColor3 = Color3.fromRGB(8, 8, 9),
-		Position = UDim2.new(0, 10, 0, 29),
+		Position = UDim2.new(0, 10, 0, compact and 28 or 29),
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, -20, 0, 6),
+		Size = UDim2.new(1, -20, 0, compact and 5 or 6),
 		Parent = frame,
 	})
 	CreateCorner(sliderBg, 100)
@@ -3732,209 +4022,79 @@ local function GetActionLabel(name)
 	return string.upper(string.sub(text, 1, math.min(#text, 2)))
 end
 
-local function CreateInlineKeybindControl(lib, parent, keybind, onChanged)
+function Library._CreateBubble(tab, config)
+	local lib = tab and tab._library
 	local c = (lib and lib._c) or c
-	local currentKey = ResolveKeybindInput(keybind)
-	local listening = false
-	local previousKey = currentKey
-
-	local keyBox = CreateInstance("Frame", {
-		Name = "InlineKeybindBox",
-		BackgroundColor3 = c.Secondary,
-		BackgroundTransparency = 0.05,
-		BorderSizePixel = 0,
-		Size = UDim2.new(0, 142, 0, 34),
-		Parent = parent,
-	})
-	CreateCorner(keyBox, 8)
-	CreateStroke(keyBox, c.Border, 0.35)
-
-	local icon = CreateInstance("ImageLabel", {
-		Name = "Icon",
-		Image = "",
-		ImageColor3 = c.TextDark,
-		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 14, 0.5, -8),
-		Size = UDim2.new(0, 16, 0, 16),
-		Parent = keyBox,
-	})
-	ApplyLucideIcon(icon, "key-round", "key", 48)
-
-	local label = CreateInstance("TextLabel", {
-		Name = "KeybindLabel",
-		FontFace = f.Regular,
-		TextColor3 = c.Text,
-		Text = "",
-		BackgroundTransparency = 1,
-		TextXAlignment = Enum.TextXAlignment.Center,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextSize = textsize.Small,
-		Position = UDim2.new(0, 38, 0, 0),
-		Size = UDim2.new(1, -66, 1, 0),
-		Parent = keyBox,
-	})
-
-	local clearButton = CreateInstance("ImageButton", {
-		Name = "ClearButton",
-		Image = "",
-		ImageColor3 = c.TextDark,
-		BackgroundTransparency = 1,
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.new(0, 14, 0, 14),
-		Parent = keyBox,
-	})
-	ApplyLucideIcon(clearButton, "x", "x", 48)
-
-	local button = CreateInstance("TextButton", {
-		Name = "Button",
-		Text = "",
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, -30, 1, 0),
-		Parent = keyBox,
-	})
-
-	local function update()
-		label.Text = listening and "..." or FormatKeybindInput(currentKey)
-		if label.Text == "" then
-			label.Text = "Ninguno"
-		end
-		clearButton.Visible = listening or currentKey ~= Enum.KeyCode.Unknown
-	end
-
-	local function setListening(state)
-		listening = state == true
-		if lib then
-			if listening then
-				lib._capturingKeybind = true
-			else
-				task.defer(function()
-					lib._capturingKeybind = false
-				end)
-			end
-		end
-		update()
-	end
-
-	button.MouseButton1Click:Connect(function()
-		previousKey = currentKey
-		setListening(true)
-	end)
-
-	clearButton.MouseButton1Click:Connect(function()
-		if listening then
-			currentKey = previousKey
-			setListening(false)
-			return
-		end
-		currentKey = Enum.KeyCode.Unknown
-		update()
-		if type(onChanged) == "function" then
-			onChanged(currentKey)
-		end
-	end)
-
-	Track(
-		lib,
-		ui.InputBegan:Connect(function(input)
-			if not listening then
-				return
-			end
-			if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Escape then
-				currentKey = previousKey
-				setListening(false)
-				return
-			end
-			local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
-			local btnNum = tonumber(input.UserInputType.Name:match("^MouseButton(%d+)$"))
-			local isSideMouseBtn = btnNum ~= nil and btnNum > 3
-			if isKeyboard then
-				currentKey = input.KeyCode
-			elseif isSideMouseBtn then
-				currentKey = input.UserInputType
-			else
-				return
-			end
-			setListening(false)
-			if type(onChanged) == "function" then
-				onChanged(currentKey)
-			end
-		end)
-	)
-
-	button.MouseEnter:Connect(function()
-		CreateTween(keyBox, { BackgroundTransparency = 0.02 }, animationspeed.Fast)
-		CreateTween(icon, { ImageColor3 = c.Accent }, animationspeed.Fast)
-	end)
-	button.MouseLeave:Connect(function()
-		CreateTween(keyBox, { BackgroundTransparency = 0.08 }, animationspeed.Fast)
-		CreateTween(icon, { ImageColor3 = c.TextDark }, animationspeed.Fast)
-	end)
-
-	update()
-	return {
-		SetKey = function(_, key)
-			currentKey = ResolveKeybindInput(key)
-			update()
-		end,
-		GetKey = function()
-			return currentKey
-		end,
-	}
-end
-
-local function CreateInlineBubbleControl(lib, parent, config, onActivated)
-	local c = (lib and lib._c) or c
+	local name = config.Name or "Bubble"
+	local labelText = config.Label or config.Text or name
+	local bubbleText = config.BubbleText or GetActionLabel(name)
 	local enabled = config.Default == true
+	local active = config.Active == true
+	local flag = config.Flag
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
+	local onChanged = config.Callback
+	local onActivated = config.Activated or config.OnActivated
 	local floatingButton
 	local floatingGui
-	local labelText = config.Text or "Burbuja"
-	local bubbleText = config.BubbleText or GetActionLabel(config.Name)
 
-	local bubbleBox = CreateInstance("Frame", {
-		Name = "InlineBubbleBox",
+	local frame = CreateInstance("Frame", {
+		Name = "Bubble_" .. name,
 		BackgroundColor3 = c.Secondary,
-		BackgroundTransparency = 0.08,
+		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(0, 118, 0, 34),
+		Size = ResolveElementSize(config, parent, s.Button.Height),
 		Parent = parent,
 	})
-	CreateCorner(bubbleBox, 8)
-	CreateStroke(bubbleBox, c.Border, 0.35)
+	CreateCorner(frame, 8)
+	CreateStroke(frame)
 
 	local label = CreateInstance("TextLabel", {
-		Name = "BubbleLabel",
+		Name = "Name",
 		FontFace = f.Regular,
 		TextColor3 = c.Text,
 		Text = labelText,
 		BackgroundTransparency = 1,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextSize = textsize.Small,
-		Position = UDim2.new(0, 14, 0, 0),
-		Size = UDim2.new(1, -48, 1, 0),
-		Parent = bubbleBox,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextSize = compact and textsize.Small or textsize.Normal,
+		Position = UDim2.new(0, 10, 0, 0),
+		Size = UDim2.new(1, -72, 1, 0),
+		Parent = frame,
 	})
 
-	local dot = CreateInstance("Frame", {
-		Name = "Dot",
-		BackgroundColor3 = enabled and c.Accent or c.Toggle.Disabled,
+	local switchBg = CreateInstance("Frame", {
+		Name = "SwitchBackground",
+		BackgroundColor3 = enabled and c.Toggle.Enabled or c.Toggle.Disabled,
 		BorderSizePixel = 0,
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -14, 0.5, 0),
-		Size = UDim2.new(0, 14, 0, 14),
-		Parent = bubbleBox,
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.new(0, s.Toggle.Width, 0, s.Toggle.Height),
+		Parent = frame,
 	})
-	CreateCorner(dot, 100)
+	switchBg:SetAttribute("Enabled", enabled == true)
+	CreateCorner(switchBg, 100)
+
+	local switchCircle = CreateInstance("Frame", {
+		Name = "Circle",
+		BackgroundColor3 = enabled and c.Background or c.Toggle.Circle,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = enabled and UDim2.new(0, 21, 0.5, 0) or UDim2.new(0, 4, 0.5, 0),
+		BorderSizePixel = 0,
+		Size = UDim2.new(0, s.Toggle.Circle, 0, s.Toggle.Circle),
+		Parent = switchBg,
+	})
+	CreateCorner(switchCircle, 100)
 
 	local button = CreateInstance("TextButton", {
 		Name = "Button",
 		Text = "",
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 1, 0),
-		Parent = bubbleBox,
+		Parent = frame,
 	})
 
-	local function updateFloatingVisual(active)
+	local function updateFloatingVisual()
 		if not floatingButton then
 			return
 		end
@@ -3953,10 +4113,11 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 			return
 		end
 		if floatingGui and floatingGui.Parent then
+			updateFloatingVisual()
 			return
 		end
 		floatingGui = CreateInstance("Frame", {
-			Name = "ActionBubble_" .. tostring(config.Name or "Action"),
+			Name = "ActionBubble_" .. tostring(name),
 			BackgroundTransparency = 1,
 			Position = config.Position or UDim2.new(1, -84, 0.5, -22),
 			Size = UDim2.new(0, 46, 0, 46),
@@ -3978,7 +4139,7 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 		})
 		CreateCorner(floatingButton, 100)
 		CreateStroke(floatingButton, c.Border, 0.25)
-		updateFloatingVisual(floatingButton:GetAttribute("MithrenBubbleActive") == true)
+		updateFloatingVisual()
 
 		local dragging = false
 		local moved = false
@@ -4031,9 +4192,25 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 	end
 
 	local methods = {}
+
 	function methods:SetEnabled(value)
 		enabled = value == true
-		dot.BackgroundColor3 = enabled and c.Accent or c.Toggle.Disabled
+		switchBg:SetAttribute("Enabled", enabled == true)
+		if enabled then
+			CreateTween(switchBg, { BackgroundColor3 = c.Toggle.Enabled }, animationspeed.Normal)
+			CreateTween(
+				switchCircle,
+				{ Position = UDim2.new(0, 21, 0.5, 0), BackgroundColor3 = c.Background },
+				animationspeed.Normal
+			)
+		else
+			CreateTween(switchBg, { BackgroundColor3 = c.Toggle.Disabled }, animationspeed.Normal)
+			CreateTween(
+				switchCircle,
+				{ Position = UDim2.new(0, 4, 0.5, 0), BackgroundColor3 = c.Toggle.Circle },
+				animationspeed.Normal
+			)
+		end
 		if enabled then
 			ensureFloating()
 		elseif floatingGui then
@@ -4044,73 +4221,53 @@ local function CreateInlineBubbleControl(lib, parent, config, onActivated)
 			floatingButton = nil
 		end
 	end
+
 	function methods:GetEnabled()
 		return enabled
 	end
+
 	function methods:SetActive(value)
-		updateFloatingVisual(value == true)
+		active = value == true
+		updateFloatingVisual()
 	end
 
 	button.MouseButton1Click:Connect(function()
 		methods:SetEnabled(not enabled)
+		if type(onChanged) == "function" then
+			onChanged(enabled)
+		end
 	end)
 
 	methods:SetEnabled(enabled)
-	return methods
-end
 
-local function FitInlineActionControls(row)
-	local controls = {}
-	for _, child in ipairs(row:GetChildren()) do
-		if child:IsA("GuiObject") then
-			controls[#controls + 1] = child
-		end
+	if flag and lib then
+		lib:_RegisterConfigElement(flag, "Toggle", function()
+			return enabled
+		end, function(value)
+			methods:SetEnabled(value == true)
+		end)
 	end
-	local count = math.max(1, math.min(#controls, 4))
-	local gap = 10
-	local offset = -((gap * (count - 1)) / count)
-	for _, child in ipairs(controls) do
-		child.Size = UDim2.new(1 / count, offset, 0, 34)
-	end
+
+	return methods
 end
 
 function Library._CreateButton(tab, config)
 	local c = (tab and tab._library and tab._library._c) or c
 	local name = config.Name or "Button"
 	local callback = config.Callback or function() end
-	local keybind = ResolveKeybindInput(config.Keybind)
-	local keybindFlag = config.KeybindFlag or (config.Flag and (config.Flag .. "_keybind")) or nil
-	local bubbleFlag = config.BubbleFlag or (config.Flag and (config.Flag .. "_bubble")) or nil
-	local keybindId = nil
-	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown)
-		or config.KeybindInline == true
-		or config.Bubble == true
-		or config.ColorPicker ~= nil
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
 
 	local frame = CreateInstance("Frame", {
 		Name = "Button_" .. name,
 		BackgroundColor3 = c.Secondary,
-		BackgroundTransparency = hasActionRow and 1 or 0.18,
+		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, hasActionRow and 86 or s.Button.Height),
-		Parent = tab.content,
+		Size = ResolveElementSize(config, parent, s.Button.Height),
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
-	local frameStroke = CreateStroke(frame, c.Border, hasActionRow and 1 or 0.35)
-
-	local surface = frame
-	if hasActionRow then
-		surface = CreateInstance("Frame", {
-			Name = "ButtonCard",
-			BackgroundColor3 = c.Secondary,
-			BackgroundTransparency = 0.18,
-			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, s.Button.Height),
-			Parent = frame,
-		})
-		CreateCorner(surface, 8)
-		CreateStroke(surface)
-	end
+	CreateStroke(frame, c.Border, 0.35)
 
 	local nameLabel = CreateInstance("TextLabel", {
 		Name = "Name",
@@ -4120,9 +4277,10 @@ function Library._CreateButton(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0.5, -10),
-		TextSize = textsize.Normal,
-		Size = UDim2.new(1, hasActionRow and -58 or -86, 0, 20),
-		Parent = surface,
+		TextSize = compact and textsize.Small or textsize.Normal,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Size = UDim2.new(1, -86, 0, 20),
+		Parent = frame,
 	})
 
 	local icon = CreateInstance("ImageLabel", {
@@ -4132,73 +4290,26 @@ function Library._CreateButton(tab, config)
 		ImageColor3 = c.Text,
 		Position = UDim2.new(1, -30, 0.5, -10),
 		Size = UDim2.new(0, 20, 0, 20),
-		Visible = not hasActionRow,
-		Parent = surface,
+		Visible = true,
+		Parent = frame,
 	})
 	ApplyLucideIcon(icon, config.Icon or "mouse-pointer-click", "mouse-pointer-click", 48)
 	CreateInstance("UIAspectRatioConstraint", {
 		Parent = icon,
 	})
 
-	local keyLabel = CreateInstance("TextLabel", {
-		Name = "KeybindLabel",
-		FontFace = f.Regular,
-		TextColor3 = c.TextDark,
-		Text = FormatKeyCode(keybind),
-		BackgroundTransparency = 1,
-		TextSize = textsize.Tiny,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		Position = UDim2.new(1, -70, 0.5, -10),
-		Size = UDim2.new(0, 60, 0, 20),
-		Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow,
-		Parent = surface,
-	})
-	icon.Visible = keybind == Enum.KeyCode.Unknown and not hasActionRow
-
 	local button = CreateInstance("TextButton", {
 		Name = "Button",
 		Text = "",
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 1, 0),
-		Parent = surface,
+		Parent = frame,
 	})
 
-	local actionRow
-	local keybindControl
-	local bubbleControl
-	local inlineColorControl
-	if hasActionRow then
-		actionRow = CreateInstance("Frame", {
-			Name = "ActionRow",
-			BackgroundTransparency = 1,
-			Position = UDim2.new(0, 0, 0, 49),
-			Size = UDim2.new(1, 0, 0, 32),
-			Parent = frame,
-		})
-		CreateListLayout(actionRow, 10, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal)
-	end
-
-	local function RegisterOrUpdateKeybind()
-		keyLabel.Text = FormatKeyCode(keybind)
-		keyLabel.Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow
-		icon.Visible = keybind == Enum.KeyCode.Unknown and not hasActionRow
-		if keybindControl then
-			keybindControl:SetKey(keybind)
-		end
-		if keybindId and tab._library then
-			tab._library:_SetRegisteredKeybind(keybindId, keybind)
-		elseif keybind ~= Enum.KeyCode.Unknown and tab._library then
-			keybindId = "button_" .. name .. "_" .. tostring(tick())
-			tab._library:_RegisterKeybind(keybindId, keybind, function()
-				callback()
-			end)
-		end
-	end
-
 	button.MouseButton1Click:Connect(function()
-		CreateTween(surface, { BackgroundTransparency = 0.08 }, animationspeed.Fast)
+		CreateTween(frame, { BackgroundTransparency = 0.08 }, animationspeed.Fast)
 		task.wait(0.1)
-		CreateTween(surface, { BackgroundTransparency = 0.18 }, animationspeed.Fast)
+		CreateTween(frame, { BackgroundTransparency = 0.18 }, animationspeed.Fast)
 		callback()
 	end)
 
@@ -4206,73 +4317,7 @@ function Library._CreateButton(tab, config)
 		SetText = function(_, text)
 			nameLabel.Text = text
 		end,
-		SetKeybind = function(_, keyCode)
-			keybind = ResolveKeybindInput(keyCode)
-			RegisterOrUpdateKeybind()
-		end,
-		GetKeybind = function()
-			return keybind
-		end,
 	}
-
-	if actionRow then
-		if keybind ~= Enum.KeyCode.Unknown or config.KeybindInline == true then
-			keybindControl = CreateInlineKeybindControl(tab._library, actionRow, keybind, function(key)
-				methods:SetKeybind(key)
-			end)
-		end
-		if config.Bubble == true then
-			bubbleControl = CreateInlineBubbleControl(tab._library, actionRow, {
-				Name = name,
-				Text = config.BubbleLabel or "Burbuja",
-				BubbleText = config.BubbleText,
-				Default = config.BubbleDefault,
-				Position = config.BubblePosition,
-			}, function()
-				callback()
-			end)
-			methods.SetBubbleEnabled = function(_, value)
-				bubbleControl:SetEnabled(value)
-			end
-			methods.GetBubbleEnabled = function()
-				return bubbleControl:GetEnabled()
-			end
-		end
-		if config.ColorPicker ~= nil then
-			local colorConfig = type(config.ColorPicker) == "table" and shallowCopyConfig(config.ColorPicker) or {}
-			colorConfig.Name = colorConfig.Name or "Color"
-			colorConfig.Compact = true
-			colorConfig.Parent = actionRow
-			inlineColorControl = Library._CreateColorPicker(tab, colorConfig)
-			methods.SetColor = function(_, value)
-				inlineColorControl:SetColor(value)
-			end
-			methods.GetColor = function()
-				return inlineColorControl:GetColor()
-			end
-		end
-		FitInlineActionControls(actionRow)
-	end
-
-	if keybind ~= Enum.KeyCode.Unknown and tab._library then
-		RegisterOrUpdateKeybind()
-	end
-
-	if keybindFlag and tab._library then
-		tab._library:_RegisterConfigElement(keybindFlag, "Keybind", function()
-			return keybind
-		end, function(value)
-			methods:SetKeybind(value)
-		end)
-	end
-
-	if bubbleFlag and bubbleControl and tab._library then
-		tab._library:_RegisterConfigElement(bubbleFlag, "Toggle", function()
-			return bubbleControl:GetEnabled()
-		end, function(value)
-			bubbleControl:SetEnabled(value == true)
-		end)
-	end
 
 	return methods
 end
@@ -4281,6 +4326,8 @@ function Library._CreateToggle(tab, config)
 	local c = (tab and tab._library and tab._library._c) or c
 	local name = config.Name or "Toggle"
 	local default = config.Default or false
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
@@ -4291,39 +4338,17 @@ function Library._CreateToggle(tab, config)
 	end
 	local flag = config.Flag
 	local enabled = default
-	local keybind = ResolveKeybindInput(config.Keybind)
-	local keybindFlag = config.KeybindFlag or (flag and (flag .. "_keybind")) or nil
-	local bubbleFlag = config.BubbleFlag or (flag and (flag .. "_bubble")) or nil
-	local keybindId = nil
-	local hasActionRow = (keybind ~= Enum.KeyCode.Unknown)
-		or config.KeybindInline == true
-		or config.Bubble == true
-		or config.ColorPicker ~= nil
 
 	local frame = CreateInstance("Frame", {
 		Name = "Toggle_" .. name,
 		BackgroundColor3 = c.Secondary,
-		BackgroundTransparency = hasActionRow and 1 or 0.18,
+		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, hasActionRow and 86 or s.Button.Height),
-		Parent = tab.content,
+		Size = ResolveElementSize(config, parent, s.Button.Height),
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
-	CreateStroke(frame, c.Border, hasActionRow and 1 or 0.35)
-
-	local surface = frame
-	if hasActionRow then
-		surface = CreateInstance("Frame", {
-			Name = "ToggleCard",
-			BackgroundColor3 = c.Secondary,
-			BackgroundTransparency = 0.18,
-			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, s.Button.Height),
-			Parent = frame,
-		})
-		CreateCorner(surface, 8)
-		CreateStroke(surface)
-	end
+	CreateStroke(frame, c.Border, 0.35)
 
 	local nameLabel = CreateInstance("TextLabel", {
 		Name = "Name",
@@ -4333,23 +4358,10 @@ function Library._CreateToggle(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0.5, -10),
-		TextSize = textsize.Normal,
+		TextSize = compact and textsize.Small or textsize.Normal,
+		TextTruncate = Enum.TextTruncate.AtEnd,
 		Size = UDim2.new(1, -72, 0, 20),
-		Parent = surface,
-	})
-
-	local keyLabel = CreateInstance("TextLabel", {
-		Name = "KeybindLabel",
-		FontFace = f.Regular,
-		TextColor3 = c.TextDark,
-		Text = FormatKeyCode(keybind),
-		BackgroundTransparency = 1,
-		TextSize = textsize.Tiny,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		Position = UDim2.new(1, -112, 0.5, -10),
-		Size = UDim2.new(0, 54, 0, 20),
-		Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow,
-		Parent = surface,
+		Parent = frame,
 	})
 
 	local switchBg = CreateInstance("Frame", {
@@ -4358,7 +4370,7 @@ function Library._CreateToggle(tab, config)
 		Position = UDim2.new(1, -52, 0.5, -10),
 		BorderSizePixel = 0,
 		Size = UDim2.new(0, s.Toggle.Width, 0, s.Toggle.Height),
-		Parent = surface,
+		Parent = frame,
 	})
 	switchBg:SetAttribute("Enabled", enabled == true)
 	CreateCorner(switchBg, 100)
@@ -4387,23 +4399,8 @@ function Library._CreateToggle(tab, config)
 		Text = "",
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 1, 0),
-		Parent = surface,
+		Parent = frame,
 	})
-
-	local actionRow
-	local keybindControl
-	local bubbleControl
-	local inlineColorControl
-	if hasActionRow then
-		actionRow = CreateInstance("Frame", {
-			Name = "ActionRow",
-			BackgroundTransparency = 1,
-			Position = UDim2.new(0, 0, 0, 49),
-			Size = UDim2.new(1, 0, 0, 32),
-			Parent = frame,
-		})
-		CreateListLayout(actionRow, 10, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal)
-	end
 
 	local function UpdateToggle()
 		switchBg:SetAttribute("Enabled", enabled == true)
@@ -4421,9 +4418,6 @@ function Library._CreateToggle(tab, config)
 				{ Position = UDim2.new(0, 4, 0.5, 0), BackgroundColor3 = c.Toggle.Circle },
 				animationspeed.Normal
 			)
-		end
-		if bubbleControl then
-			bubbleControl:SetActive(enabled)
 		end
 	end
 
@@ -4446,89 +4440,13 @@ function Library._CreateToggle(tab, config)
 		GetValue = function()
 			return enabled
 		end,
-		SetKeybind = function(_, keyCode)
-			keybind = ResolveKeybindInput(keyCode)
-			keyLabel.Text = FormatKeyCode(keybind)
-			keyLabel.Visible = keybind ~= Enum.KeyCode.Unknown and not hasActionRow
-			if keybindControl then
-				keybindControl:SetKey(keybind)
-			end
-			if keybindId and tab._library then
-				tab._library:_SetRegisteredKeybind(keybindId, keybind)
-			elseif keybind ~= Enum.KeyCode.Unknown and tab._library then
-				keybindId = "toggle_" .. name .. "_" .. tostring(tick())
-				tab._library:_RegisterKeybind(keybindId, keybind, ToggleValue)
-			end
-		end,
-		GetKeybind = function()
-			return keybind
-		end,
 	}
-
-	if actionRow then
-		if keybind ~= Enum.KeyCode.Unknown or config.KeybindInline == true then
-			keybindControl = CreateInlineKeybindControl(tab._library, actionRow, keybind, function(key)
-				methods:SetKeybind(key)
-			end)
-		end
-		if config.Bubble == true then
-			bubbleControl = CreateInlineBubbleControl(tab._library, actionRow, {
-				Name = name,
-				Text = config.BubbleLabel or "Burbuja",
-				BubbleText = config.BubbleText,
-				Default = config.BubbleDefault,
-				Position = config.BubblePosition,
-			}, ToggleValue)
-			bubbleControl:SetActive(enabled)
-			methods.SetBubbleEnabled = function(_, value)
-				bubbleControl:SetEnabled(value)
-			end
-			methods.GetBubbleEnabled = function()
-				return bubbleControl:GetEnabled()
-			end
-		end
-		if config.ColorPicker ~= nil then
-			local colorConfig = type(config.ColorPicker) == "table" and shallowCopyConfig(config.ColorPicker) or {}
-			colorConfig.Name = colorConfig.Name or "Color"
-			colorConfig.Compact = true
-			colorConfig.Parent = actionRow
-			inlineColorControl = Library._CreateColorPicker(tab, colorConfig)
-			methods.SetColor = function(_, value)
-				inlineColorControl:SetColor(value)
-			end
-			methods.GetColor = function()
-				return inlineColorControl:GetColor()
-			end
-		end
-		FitInlineActionControls(actionRow)
-	end
 
 	if flag and tab._library then
 		tab._library:_RegisterConfigElement(flag, "Toggle", function()
 			return enabled
 		end, function(value)
 			methods:SetValue(value)
-		end)
-	end
-
-	if keybind ~= Enum.KeyCode.Unknown and tab._library then
-		keybindId = "toggle_" .. name .. "_" .. tostring(tick())
-		tab._library:_RegisterKeybind(keybindId, keybind, ToggleValue)
-	end
-
-	if keybindFlag and tab._library then
-		tab._library:_RegisterConfigElement(keybindFlag, "Keybind", function()
-			return keybind
-		end, function(value)
-			methods:SetKeybind(value)
-		end)
-	end
-
-	if bubbleFlag and bubbleControl and tab._library then
-		tab._library:_RegisterConfigElement(bubbleFlag, "Toggle", function()
-			return bubbleControl:GetEnabled()
-		end, function(value)
-			bubbleControl:SetEnabled(value == true)
 		end)
 	end
 
@@ -4541,6 +4459,9 @@ function Library._CreateDropdown(tab, config)
 	local options = config.Options or { "Option 1", "Option 2", "Option 3" }
 	local default = config.Default or options[1]
 	local multiSelect = config.MultiSelect or false
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
+	local dense = IsDenseCompactElement(config, parent)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
@@ -4572,10 +4493,10 @@ function Library._CreateDropdown(tab, config)
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, s.Dropdown.Height),
+		Size = ResolveElementSize(config, parent, s.Dropdown.Height),
 		ClipsDescendants = false,
 		ZIndex = 1,
-		Parent = tab.content,
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
 	CreateStroke(frame)
@@ -4588,19 +4509,36 @@ function Library._CreateDropdown(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0, 10),
-		TextSize = textsize.Normal,
-		Size = UDim2.new(0, 200, 0, 20),
+		TextSize = compact and textsize.Small or textsize.Normal,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Visible = not dense,
+		Size = compact and UDim2.new(1, -132, 0, 20) or UDim2.new(0, 200, 0, 20),
 		ZIndex = 1,
 		Parent = frame,
 	})
+
+	local compactIcon = CreateInstance("ImageLabel", {
+		Name = "CompactIcon",
+		BackgroundTransparency = 1,
+		Image = "",
+		ImageColor3 = c.TextDark,
+		Position = UDim2.new(0, 12, 0.5, -8),
+		Size = UDim2.new(0, 16, 0, 16),
+		Visible = dense,
+		ZIndex = 2,
+		Parent = frame,
+	})
+	ApplyLucideIcon(compactIcon, config.Icon or "list-filter", "list-filter", 48)
 
 	local selectedDisplay = CreateInstance("Frame", {
 		Name = "SelectedDisplay",
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.08,
-		Position = UDim2.new(1, -145, 0, 6),
+		Position = dense and UDim2.new(0, 34, 0, 6)
+			or (compact and UDim2.new(1, -122, 0, 6) or UDim2.new(1, -145, 0, 6)),
 		BorderSizePixel = 0,
-		Size = UDim2.new(0, 135, 0, 26),
+		Size = dense and UDim2.new(1, -44, 0, 26)
+			or (compact and UDim2.new(0, 112, 0, 26) or UDim2.new(0, 135, 0, 26)),
 		ZIndex = 2,
 		Parent = frame,
 	})
@@ -4637,6 +4575,7 @@ function Library._CreateDropdown(tab, config)
 
 	local maxVisibleOptions = 5
 	local containerHeight = math.min(#options * s.Dropdown.OptionHeight, maxVisibleOptions * s.Dropdown.OptionHeight)
+	local dropdownPopupWidth = compact and 112 or 135
 
 	local screenGui = tab.content:FindFirstAncestorOfClass("ScreenGui") or tab.content
 
@@ -4646,7 +4585,7 @@ function Library._CreateDropdown(tab, config)
 		BackgroundTransparency = 0.02,
 		Position = UDim2.new(0, 0, 0, 0),
 		BorderSizePixel = 0,
-		Size = UDim2.new(0, 135, 0, containerHeight),
+		Size = UDim2.new(0, dropdownPopupWidth, 0, containerHeight),
 		Visible = false,
 		ZIndex = 5000,
 		ClipsDescendants = true,
@@ -4911,6 +4850,9 @@ function Library._CreateKeybind(tab, config, lib)
 	local default = ResolveKeyCode(config.Default, Enum.KeyCode.Unknown)
 	local callback = config.Callback or function() end
 	local flag = config.Flag
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
+	local dense = IsDenseCompactElement(config, parent)
 	local currentKey = default
 	local listening = false
 
@@ -4919,8 +4861,8 @@ function Library._CreateKeybind(tab, config, lib)
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, s.Button.Height),
-		Parent = tab.content,
+		Size = ResolveElementSize(config, parent, s.Button.Height),
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
 	CreateStroke(frame)
@@ -4933,10 +4875,24 @@ function Library._CreateKeybind(tab, config, lib)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0.5, -10),
-		TextSize = textsize.Normal,
-		Size = UDim2.new(1, -145, 0, 20),
+		TextSize = compact and textsize.Small or textsize.Normal,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Visible = not dense,
+		Size = UDim2.new(1, compact and -104 or -145, 0, 20),
 		Parent = frame,
 	})
+
+	local compactIcon = CreateInstance("ImageLabel", {
+		Name = "CompactIcon",
+		BackgroundTransparency = 1,
+		Image = "",
+		ImageColor3 = c.TextDark,
+		Position = UDim2.new(0, 12, 0.5, -8),
+		Size = UDim2.new(0, 16, 0, 16),
+		Visible = dense,
+		Parent = frame,
+	})
+	ApplyLucideIcon(compactIcon, config.Icon or "keyboard", "keyboard", 48)
 
 	local keybindBox = CreateInstance("Frame", {
 		Name = "KeybindBox",
@@ -4945,7 +4901,7 @@ function Library._CreateKeybind(tab, config, lib)
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -10, 0.5, 0),
 		BorderSizePixel = 0,
-		Size = UDim2.new(0, 78, 0, 26),
+		Size = dense and UDim2.new(1, -44, 0, 26) or UDim2.new(0, compact and 72 or 78, 0, 26),
 		Parent = frame,
 	})
 	CreateCorner(keybindBox, 8)
@@ -5001,7 +4957,7 @@ function Library._CreateKeybind(tab, config, lib)
 			clearButton.Visible = true
 			keyLabel.Size = UDim2.new(1, -34, 1, 0)
 			button.Size = UDim2.new(1, -28, 1, 0)
-			keybindBox.Size = UDim2.new(0, 74, 0, 26)
+			keybindBox.Size = dense and UDim2.new(1, -44, 0, 26) or UDim2.new(0, 74, 0, 26)
 		else
 			local keyName = FormatKeybindInput(currentKey)
 			if keyName == "" then
@@ -5010,8 +4966,13 @@ function Library._CreateKeybind(tab, config, lib)
 			clearButton.Visible = currentKey ~= Enum.KeyCode.Unknown
 			keyLabel.Size = clearButton.Visible and UDim2.new(1, -34, 1, 0) or UDim2.new(1, -12, 1, 0)
 			button.Size = clearButton.Visible and UDim2.new(1, -28, 1, 0) or UDim2.new(1, 0, 1, 0)
-			local textWidth = math.clamp(#keyName * 9 + (clearButton.Visible and 44 or 24), 74, 130)
-			keybindBox.Size = UDim2.new(0, textWidth, 0, 26)
+			if dense then
+				keybindBox.Size = UDim2.new(1, -44, 0, 26)
+			else
+				local maxWidth = compact and 96 or 130
+				local textWidth = math.clamp(#keyName * 9 + (clearButton.Visible and 44 or 24), 72, maxWidth)
+				keybindBox.Size = UDim2.new(0, textWidth, 0, 26)
+			end
 			keyLabel.Text = keyName
 		end
 	end
@@ -5136,15 +5097,16 @@ function Library._CreateColorPicker(tab, config)
 	local currentColor = default
 	local hue, sat, val = currentColor:ToHSV()
 	local expanded = false
-	local compact = config.Compact == true
-	local parent = config.Parent or tab.content
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
 
 	local frame = CreateInstance("Frame", {
 		Name = "ColorPicker_" .. name,
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = compact and UDim2.new(0, 118, 0, 34) or UDim2.new(1, 0, 0, s.Button.Height),
+		Size = config.WidthScale and ResolveElementSize(config, parent, s.Button.Height)
+			or (compact and UDim2.new(0, 118, 0, 34) or UDim2.new(1, 0, 0, s.Button.Height)),
 		Parent = parent,
 	})
 	CreateCorner(frame, 8)
@@ -5476,6 +5438,9 @@ function Library._CreateTextBox(tab, config)
 	local name = config.Name or "TextBox"
 	local default = config.Default or ""
 	local placeholder = config.Placeholder or "Enter text..."
+	local parent = ResolveElementParent(tab, config)
+	local compact = IsCompactElement(config, parent)
+	local dense = IsDenseCompactElement(config, parent)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
@@ -5494,8 +5459,8 @@ function Library._CreateTextBox(tab, config)
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, s.TextBox.Height),
-		Parent = tab.content,
+		Size = ResolveElementSize(config, parent, compact and s.Button.Height or s.TextBox.Height),
+		Parent = parent,
 	})
 	CreateCorner(frame, 8)
 	CreateStroke(frame)
@@ -5508,8 +5473,10 @@ function Library._CreateTextBox(tab, config)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 10, 0.5, -10),
-		TextSize = textsize.Normal,
-		Size = UDim2.new(0, 150, 0, 20),
+		TextSize = compact and textsize.Small or textsize.Normal,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Visible = not dense,
+		Size = compact and UDim2.new(1, -122, 0, 20) or UDim2.new(0, 150, 0, 20),
 		Parent = frame,
 	})
 
@@ -5519,7 +5486,8 @@ function Library._CreateTextBox(tab, config)
 		Image = "",
 		ImageColor3 = c.TextDark,
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -165, 0.5, 0),
+		Position = dense and UDim2.new(0, 28, 0.5, 0)
+			or (compact and UDim2.new(1, -118, 0.5, 0) or UDim2.new(1, -165, 0.5, 0)),
 		Size = UDim2.new(0, 18, 0, 18),
 		Parent = frame,
 	})
@@ -5532,7 +5500,8 @@ function Library._CreateTextBox(tab, config)
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -10, 0.5, 0),
 		BorderSizePixel = 0,
-		Size = UDim2.new(0, s.TextBox.InputWidth, 0, 26),
+		Size = dense and UDim2.new(1, -44, 0, 26)
+			or (compact and UDim2.new(0, 96, 0, 26) or UDim2.new(0, s.TextBox.InputWidth, 0, 26)),
 		ClipsDescendants = true,
 		Parent = frame,
 	})
@@ -5761,6 +5730,149 @@ function Library._CreateConfigSection(tab, config)
 			configDropdown:Refresh(lib:GetConfigs())
 		end,
 	}
+end
+
+local MithrenInternalTestEnabled = rawget(_G, "MithrenTestEnabled") == true
+
+local function RunMithrenInternalTest()
+	pcall(function()
+		local oldWindow = rawget(_G, "MithrenInternalTestWindow")
+		if oldWindow and type(oldWindow.Destroy) == "function" then
+			oldWindow:Destroy()
+		end
+	end)
+
+	local testAccent = Color3.fromRGB(79, 195, 247)
+	local window = Library:Window({
+		Title = "Mithren Test",
+		ConfigFolder = "MithrenInternalTest",
+		Version = "row-test",
+	})
+
+	_G.MithrenInternalTestWindow = window
+	window:SetToggleKey(Enum.KeyCode.RightControl)
+
+	local principal = window:CreateSection("Principal")
+	local config = window:CreateSection("Config")
+
+	local rows = principal:CreateTab("Filas", "columns-3")
+	local settings = config:CreateTab("Config", "settings")
+
+	local function addTestElement(row, itemType, suffix)
+		if itemType == "Button" then
+			row:CreateButton({
+				Name = "Boton",
+				Icon = "play",
+				Callback = function()
+					window:Notify({
+						Title = "Mithren",
+						Description = "Boton de test",
+						Duration = 2,
+						Icon = "check",
+					})
+				end,
+			})
+		elseif itemType == "Toggle" then
+			row:CreateToggle({
+				Name = "Toggle",
+				Default = false,
+				Flag = "mithren_test_toggle_" .. suffix,
+				Callback = function() end,
+			})
+		elseif itemType == "Slider" then
+			row:CreateSlider({
+				Name = "Slider",
+				Min = 0,
+				Max = 100,
+				Default = 35,
+				Flag = "mithren_test_slider_" .. suffix,
+				Callback = function() end,
+			})
+		elseif itemType == "Dropdown" then
+			row:CreateDropdown({
+				Name = "Select",
+				Options = { "Uno", "Dos", "Tres" },
+				Default = "Uno",
+				Flag = "mithren_test_dropdown_" .. suffix,
+				Callback = function() end,
+			})
+		elseif itemType == "Keybind" then
+			row:CreateKeybind({
+				Name = "Keybind",
+				Default = Enum.KeyCode.F,
+				Flag = "mithren_test_keybind_" .. suffix,
+				Callback = function() end,
+			})
+		elseif itemType == "ColorPicker" then
+			row:CreateColorPicker({
+				Name = "Color",
+				Default = testAccent,
+				Flag = "mithren_test_color_" .. suffix,
+				Callback = function(color)
+					window:SetAccentColor(color)
+				end,
+			})
+		elseif itemType == "Bubble" then
+			row:CreateBubble({
+				Name = "Bubble",
+				Default = true,
+				Flag = "mithren_test_bubble_" .. suffix,
+				BubbleText = "B",
+				Activated = function() end,
+			})
+		elseif itemType == "TextBox" then
+			row:CreateTextBox({
+				Name = "Texto",
+				Default = "",
+				Placeholder = "Input",
+				Flag = "mithren_test_textbox_" .. suffix,
+				Callback = function() end,
+			})
+		end
+	end
+
+	local function addComponentRows(columns, title, suffix)
+		rows:CreateSection(title)
+		local items = {
+			"Button",
+			"Toggle",
+			"Slider",
+			"Dropdown",
+			"Keybind",
+			"ColorPicker",
+			"Bubble",
+			"TextBox",
+		}
+
+		local index = 1
+		while index <= #items do
+			local row = rows:CreateRow(columns)
+			for _ = 1, columns do
+				local itemType = items[index]
+				if itemType then
+					addTestElement(row, itemType, suffix .. "_" .. tostring(index))
+				end
+				index += 1
+			end
+		end
+	end
+
+	addComponentRows(1, "1 componente por fila", "one")
+	addComponentRows(2, "2 componentes por fila", "two")
+	addComponentRows(3, "3 componentes por fila", "three")
+
+	settings:CreateConfigSection({
+		Title = "Saves",
+		ShowHelp = true,
+		ShowAdvanced = true,
+		ShowAutoSave = true,
+	})
+
+	return window
+end
+
+if MithrenInternalTestEnabled then
+	RunMithrenInternalTest()
 end
 
 _G.MithrenLibrary = Library
