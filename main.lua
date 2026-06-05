@@ -5,6 +5,7 @@ local lg = game:GetService("Lighting")
 local rs = game:GetService("RunService")
 local gs = game:GetService("GuiService")
 local hs = game:GetService("HttpService")
+local lcs = game:GetService("LocalizationService")
 
 local n = "Mithren"
 
@@ -906,6 +907,55 @@ local function GetAvailableConfigs(configFolder)
 	return configs
 end
 
+local function NormalizeLanguageCode(language)
+	local text = tostring(language or ""):lower():gsub("_", "-")
+	local code = text:match("^%s*([%a][%a]?)")
+	if code == "sp" then
+		return "es"
+	end
+	return code or ""
+end
+
+local function GetSystemLanguageCode(fallback)
+	local ok, locale = pcall(function()
+		return lcs.SystemLocaleId
+	end)
+	local code = ok and NormalizeLanguageCode(locale) or ""
+	if code == "" then
+		code = NormalizeLanguageCode(fallback or "en")
+	end
+	return code ~= "" and code or "en"
+end
+
+local function GetLanguageCachePath(configFolder, language)
+	return GetConfigRoot(configFolder) .. "/localization_" .. SanitizeConfigName(language) .. ".json"
+end
+
+local function ReadJsonFile(path)
+	if not readfile or not isfile or not isfile(path) then
+		return nil
+	end
+	local ok, content = pcall(readfile, path)
+	if not ok or type(content) ~= "string" or content == "" then
+		return nil
+	end
+	local decodedOk, decoded = pcall(function()
+		return hs:JSONDecode(content)
+	end)
+	return decodedOk and decoded or nil
+end
+
+local function WriteJsonFile(configFolder, path, value)
+	if not writefile then
+		return false
+	end
+	EnsureConfigFolder(configFolder)
+	local ok = pcall(function()
+		writefile(path, hs:JSONEncode(value))
+	end)
+	return ok
+end
+
 local AcrylicBlur = {}
 AcrylicBlur.__index = AcrylicBlur
 
@@ -1195,14 +1245,26 @@ function Library.new(title, configFolder, config)
 	self._isLoading = false
 	self._autoSavePending = false
 	self._elementTransparency = 0.18
+	local localizationConfig = config.Localization or config.I18n or config.I18nConfig
+	local localizationOptions = type(localizationConfig) == "table"
+			and (localizationConfig.Options or localizationConfig.Languages or localizationConfig.LanguageOptions)
+		or nil
+	local localizationDefault = type(localizationConfig) == "table"
+			and (localizationConfig.Default or localizationConfig.DefaultLanguage or localizationConfig.Language)
+		or nil
+	if type(localizationConfig) == "table" and localizationConfig.AutoDetect ~= false then
+		localizationDefault = GetSystemLanguageCode(localizationDefault or localizationConfig.Fallback or "en")
+	end
+
 	local languageSelector = config.LanguageSelector
 	local languageOptions = config.Languages or config.LanguageOptions
-	local languageDefault = config.DefaultLanguage or config.Language
+	local languageDefault = config.DefaultLanguage or config.Language or localizationDefault
 	if type(languageSelector) == "table" then
 		languageOptions = languageSelector.Options
 			or languageSelector.Languages
 			or languageSelector.LanguageOptions
 			or languageOptions
+			or localizationOptions
 		languageDefault = languageSelector.Default
 			or languageSelector.DefaultLanguage
 			or languageSelector.Language
@@ -1219,8 +1281,18 @@ function Library.new(title, configFolder, config)
 		self._languageSelectorAlwaysVisible = config.LanguageSelectorAlwaysVisible == true
 		self._languageSelectorIcon = config.LanguageSelectorIcon or "globe"
 	end
+	languageOptions = languageOptions or localizationOptions
 	self._languageOptions = languageSelector == false and nil or languageOptions
+	local savedLanguage = ReadJsonFile(GetConfigPath(self.configFolder, "__language"))
+	if type(savedLanguage) == "table" and savedLanguage.Language ~= nil then
+		languageDefault = savedLanguage.Language
+	end
 	self._language = languageDefault
+	self._localization = nil
+	self._restartConfig = config.Restart or config.Reexecute
+	if type(localizationConfig) == "table" then
+		self:ConfigureLocalization(localizationConfig, true)
+	end
 	self._theme = {
 		AccentColor = c.Accent,
 		BackgroundColor = c.Background,
@@ -1236,6 +1308,12 @@ function Library.new(title, configFolder, config)
 		BackgroundDim = 0.45,
 		AcrylicBlurEnabled = self._acrylicBlurEnabled,
 	}
+	if self._localization then
+		if self._localization.Fallback and self._localization.Fallback ~= self._language then
+			self:LoadLanguage(self._localization.Fallback)
+		end
+		self:LoadLanguage(self._language)
+	end
 	if readfile and isfile and DeserializeConfigValue then
 		local path = GetConfigPath(self.configFolder, "__session")
 		if isfile(path) then
@@ -1261,6 +1339,7 @@ function Library.new(title, configFolder, config)
 		end
 	end
 	self:_CreateMainv0rtexd()
+	self:_CreateSystemTabs()
 	self:_SetupKeybindListener()
 	self:_SetupMobileSupport()
 	EnsureNotificationContainer(self)
@@ -1436,14 +1515,332 @@ function Library:GetToggleKey()
 	return self._toggleKey
 end
 
+function Library:ConfigureLocalization(config, skipInitialLoad)
+	config = type(config) == "table" and config or {}
+	local defaultLanguage = config.Default or config.DefaultLanguage or config.Language or self._language or "en"
+	local fallbackLanguage = config.Fallback or config.FallbackLanguage or defaultLanguage
+	local translations = {}
+	local inlineTranslations = config.Translations or config.Packs
+	if type(inlineTranslations) == "table" then
+		for language, pack in pairs(inlineTranslations) do
+			translations[tostring(language)] = self:_NormalizeLocalizationPack(pack) or pack
+		end
+	end
+
+	self._localization = {
+		Default = tostring(defaultLanguage),
+		Fallback = tostring(fallbackLanguage),
+		Sources = config.Sources or config.Source or config.Urls or config.Url,
+		BaseUrl = config.BaseUrl,
+		Cache = config.Cache ~= false,
+		Translations = translations,
+		PromptRestart = config.PromptRestart ~= false,
+		RestartOnChange = config.RestartOnChange ~= false,
+		Messages = config.Messages or {},
+	}
+	self._restartConfig = config.Restart or config.Reexecute or self._restartConfig
+	if (not self._language or self._language == "") and config.AutoDetect ~= false then
+		self._language = GetSystemLanguageCode(defaultLanguage)
+	end
+	if not skipInitialLoad then
+		self:LoadLanguage(self._language or defaultLanguage)
+	end
+	return self
+end
+
+function Library:_GetLocalizationMessage(key, fallback)
+	local localization = self._localization
+	local language = self._language or (localization and localization.Default) or "en"
+	local messages = localization and localization.Messages
+	local languageMessages = type(messages) == "table" and (messages[language] or messages[NormalizeLanguageCode(language)]) or nil
+	if type(languageMessages) == "table" and languageMessages[key] then
+		return languageMessages[key]
+	end
+	local fallbackMessages = type(messages) == "table" and messages[localization and localization.Fallback or "en"] or nil
+	if type(fallbackMessages) == "table" and fallbackMessages[key] then
+		return fallbackMessages[key]
+	end
+	return fallback
+end
+
+function Library:_ResolveLocalizationSource(language)
+	local localization = self._localization
+	if not localization then
+		return nil
+	end
+	local sources = localization.Sources
+	if type(sources) == "function" then
+		return sources(language, self)
+	elseif type(sources) == "table" then
+		return sources[language] or sources[NormalizeLanguageCode(language)]
+	elseif type(sources) == "string" then
+		return sources
+	end
+	if type(localization.BaseUrl) == "string" and localization.BaseUrl ~= "" then
+		return localization.BaseUrl:gsub("/+$", "") .. "/" .. tostring(language) .. ".json"
+	end
+	return nil
+end
+
+function Library:_NormalizeLocalizationPack(pack)
+	if type(pack) ~= "table" then
+		return nil
+	end
+	if type(pack.Translations) == "table" then
+		return pack.Translations
+	end
+	if type(pack.translations) == "table" then
+		return pack.translations
+	end
+	if type(pack.Messages) == "table" then
+		return pack.Messages
+	end
+	return pack
+end
+
+function Library:LoadLanguage(language, forceRefresh)
+	local localization = self._localization
+	if not localization then
+		return false
+	end
+	language = tostring(language or self._language or localization.Default or "en")
+	if localization.Translations[language] and not forceRefresh then
+		return true, localization.Translations[language]
+	end
+
+	local cachePath = GetLanguageCachePath(self.configFolder, language)
+	if localization.Cache and not forceRefresh then
+		local cached = self:_NormalizeLocalizationPack(ReadJsonFile(cachePath))
+		if cached then
+			localization.Translations[language] = cached
+			return true, cached, "cache"
+		end
+	end
+
+	local source = self:_ResolveLocalizationSource(language)
+	local pack
+	if type(source) == "table" then
+		pack = source
+	elseif type(source) == "function" then
+		local ok, result = pcall(source, language, self)
+		if ok then
+			pack = result
+		end
+	elseif type(source) == "string" and source ~= "" then
+		local ok, result = pcall(function()
+			return game:HttpGet(source)
+		end)
+		if ok and type(result) == "string" then
+			local decodedOk, decoded = pcall(function()
+				return hs:JSONDecode(result)
+			end)
+			if decodedOk then
+				pack = decoded
+			end
+		end
+	end
+
+	pack = self:_NormalizeLocalizationPack(pack)
+	if pack then
+		localization.Translations[language] = pack
+		if localization.Cache then
+			WriteJsonFile(self.configFolder, cachePath, pack)
+		end
+		return true, pack, "remote"
+	end
+	return false
+end
+
+function Library:T(key, fallback, ...)
+	local localization = self._localization
+	local language = self._language or (localization and localization.Default) or "en"
+	local pack = localization and localization.Translations and localization.Translations[language]
+	local fallbackPack = localization and localization.Translations and localization.Translations[localization.Fallback]
+	local text = type(pack) == "table" and pack[key] or nil
+	if text == nil and type(fallbackPack) == "table" then
+		text = fallbackPack[key]
+	end
+	if text == nil then
+		text = fallback ~= nil and fallback or key
+	end
+	if select("#", ...) > 0 then
+		local ok, formatted = pcall(string.format, tostring(text), ...)
+		if ok then
+			return formatted
+		end
+	end
+	return tostring(text)
+end
+
+function Library:PromptRestart(config)
+	config = type(config) == "table" and config or {}
+	if self._restartPrompt and self._restartPrompt.Parent then
+		self._restartPrompt:Destroy()
+	end
+	local c = self._c or c
+	local overlay = CreateInstance("Frame", {
+		Name = "RestartPrompt",
+		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+		BackgroundTransparency = 0.42,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 9000,
+		Parent = self.screenGui,
+	})
+	local modal = CreateInstance("Frame", {
+		Name = "Modal",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = c.Notification.Background,
+		BorderSizePixel = 0,
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0, 330, 0, 168),
+		ZIndex = 9001,
+		Parent = overlay,
+	})
+	CreateCorner(modal, 8)
+	CreateStroke(modal, c.Notification.Border, 0.08)
+	CreatePadding(modal, 16, 16, 16, 16)
+	CreateInstance("TextLabel", {
+		Name = "Title",
+		BackgroundTransparency = 1,
+		FontFace = f.Bold,
+		Text = config.Title or self:_GetLocalizationMessage("RestartTitle", "Restart required"),
+		TextColor3 = c.Text,
+		TextSize = textsize.Title,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0, 22),
+		ZIndex = 9002,
+		Parent = modal,
+	})
+	CreateInstance("TextLabel", {
+		Name = "Description",
+		BackgroundTransparency = 1,
+		FontFace = f.Regular,
+		Text = config.Description
+			or self:_GetLocalizationMessage("RestartDescription", "The language pack was changed. Restart the script to apply everything cleanly."),
+		TextColor3 = c.TextDark,
+		TextSize = textsize.Small,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Position = UDim2.new(0, 0, 0, 34),
+		Size = UDim2.new(1, 0, 0, 56),
+		ZIndex = 9002,
+		Parent = modal,
+	})
+	local buttons = CreateInstance("Frame", {
+		Name = "Buttons",
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0, 0, 1, -38),
+		Size = UDim2.new(1, 0, 0, 34),
+		ZIndex = 9002,
+		Parent = modal,
+	})
+	CreateListLayout(buttons, 8, Enum.SortOrder.LayoutOrder, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Right)
+	local buttonsLayout = buttons:FindFirstChildOfClass("UIListLayout")
+	if buttonsLayout then
+		buttonsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	end
+
+	local function CreateModalButton(text, filled, callback)
+		local button = CreateInstance("TextButton", {
+			Name = text,
+			BackgroundColor3 = filled and c.Accent or c.Secondary,
+			BackgroundTransparency = filled and 0 or 0.14,
+			BorderSizePixel = 0,
+			FontFace = f.Regular,
+			Text = text,
+			TextColor3 = filled and c.Background or c.Text,
+			TextSize = textsize.Small,
+			Size = UDim2.new(0, 112, 1, 0),
+			ZIndex = 9003,
+			Parent = buttons,
+		})
+		CreateCorner(button, 7)
+		CreateStroke(button, filled and c.Accent or c.Border, filled and 0.35 or 0.22)
+		button.MouseButton1Click:Connect(callback)
+		return button
+	end
+
+	CreateModalButton(config.CancelText or self:_GetLocalizationMessage("RestartLater", "Later"), false, function()
+		overlay:Destroy()
+	end)
+	CreateModalButton(config.RestartText or self:_GetLocalizationMessage("RestartNow", "Restart"), true, function()
+		overlay:Destroy()
+		self:Restart()
+	end)
+
+	self._restartPrompt = overlay
+	return overlay
+end
+
+function Library:Restart()
+	local restart = self._restartConfig
+	if type(restart) == "function" then
+		return restart(self)
+	end
+	if type(restart) == "table" then
+		local callback = restart.Callback or restart.Function or restart.Reexecute
+		if type(callback) == "function" then
+			return callback(self)
+		end
+		local source = restart.Source or restart.Script
+		local url = restart.Url or restart.SourceUrl or restart.ScriptUrl
+		if type(url) == "string" and url ~= "" then
+			local ok, result = pcall(function()
+				return game:HttpGet(url)
+			end)
+			if ok then
+				source = result
+			end
+		end
+		if type(source) == "string" and source ~= "" and loadstring then
+			self:Destroy()
+			return loadstring(source)()
+		end
+	elseif type(restart) == "string" and restart ~= "" and loadstring then
+		self:Destroy()
+		return loadstring(restart)()
+	end
+	self:Notify({
+		Title = self:_GetLocalizationMessage("RestartUnavailableTitle", "Restart"),
+		Description = self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script."),
+		Duration = 3,
+		Icon = "refresh-cw",
+	})
+	return false
+end
+
+function Library:_HandleLanguageChanged(option, fireCallback, previousLanguage)
+	previousLanguage = previousLanguage ~= nil and tostring(previousLanguage) or self._language
+	local language = option and option.Value or self._language
+	self._language = language ~= nil and tostring(language) or self._language
+	if self._localization then
+		self:LoadLanguage(self._language)
+	end
+	WriteJsonFile(self.configFolder, GetConfigPath(self.configFolder, "__language"), {
+		Language = self._language,
+	})
+	if fireCallback ~= false and type(self._languageCallback) == "function" then
+		self._languageCallback(self._language, option)
+	end
+	local localization = self._localization
+	if
+		localization
+		and fireCallback ~= false
+		and self._isLoading ~= true
+		and previousLanguage ~= self._language
+		and localization.RestartOnChange
+		and localization.PromptRestart
+	then
+		self:PromptRestart()
+	end
+end
+
 function Library:SetLanguage(language, fireCallback)
 	if self._setTopBarLanguage then
 		self._setTopBarLanguage(language, fireCallback ~= false)
 	else
-		self._language = tostring(language)
-		if fireCallback ~= false and type(self._languageCallback) == "function" then
-			self._languageCallback(self._language)
-		end
+		self:_HandleLanguageChanged({ Value = language, Label = language }, fireCallback ~= false, self._language)
 	end
 end
 
@@ -1974,12 +2371,11 @@ function Library:_CreateTopBarLanguageSelect()
 
 	local function SetLanguage(language, fireCallback)
 		local option = FindLanguageOption(language)
+		local previousLanguage = self._language
 		self._language = option.Value
 		selectedLabel.Text = option.Label
 		UpdateLanguageOptionStates()
-		if fireCallback and type(self._languageCallback) == "function" then
-			self._languageCallback(self._language, option)
-		end
+		self:_HandleLanguageChanged(option, fireCallback, previousLanguage)
 	end
 
 	local function CloseOptions()
@@ -5588,6 +5984,284 @@ function Library._CreateTextBox(tab, config)
 	return methods
 end
 
+function Library:_CreateSystemTabs()
+	if self.systemTabs then
+		return self.systemTabs
+	end
+
+	local section = self:CreateSection("Ajustes")
+	if section.frame then
+		section.frame.LayoutOrder = 9999
+	end
+	local settingsTab = section:CreateTab("Ajustes", "settings")
+	local themeTab = section:CreateTab("Tema", "palette")
+	local savesTab = section:CreateTab("Guardados", "save")
+
+	self.systemTabs = {
+		Section = section,
+		Settings = settingsTab,
+		Theme = themeTab,
+		Saves = savesTab,
+	}
+
+	Library._CreateContentSection(settingsTab, "Ajustes")
+
+	local function normalizeLanguageOption(option)
+		if type(option) == "table" then
+			local value = option.Value or option.Code or option.Id or option.Name or option.Label or option[1]
+			local label = option.Label or option.Name or option.Title or value
+			return {
+				Label = tostring(label or ""),
+				Value = value ~= nil and value or label,
+			}
+		end
+		return {
+			Label = tostring(option or ""),
+			Value = option,
+		}
+	end
+
+	local languageOptions = {}
+	local languageByLabel = {}
+	if type(self._languageOptions) == "table" then
+		for _, rawOption in ipairs(self._languageOptions) do
+			local option = normalizeLanguageOption(rawOption)
+			if option.Label ~= "" then
+				table.insert(languageOptions, option.Label)
+				languageByLabel[option.Label] = option.Value
+			end
+		end
+	end
+
+	if #languageOptions > 0 then
+		local currentLanguageLabel = languageOptions[1]
+		for label, value in pairs(languageByLabel) do
+			if value == self._language or label == tostring(self._language) then
+				currentLanguageLabel = label
+				break
+			end
+		end
+
+		Library._CreateDropdown(settingsTab, {
+			Name = "Idioma",
+			Options = languageOptions,
+			Default = currentLanguageLabel,
+			Flag = "mithren_system_language",
+			Callback = function(selected)
+				local label = type(selected) == "table" and (selected[1] or selected.Label or selected.Value) or selected
+				local value = languageByLabel[tostring(label)] or label
+				self:SetLanguage(value)
+			end,
+		})
+	end
+
+	Library._CreateKeybind(settingsTab, {
+		Name = "Abrir/cerrar UI",
+		Default = self:GetToggleKey(),
+		Flag = "mithren_system_toggle_keybind",
+		Register = false,
+		Changed = function(keyCode)
+			self:SetToggleKey(keyCode)
+		end,
+	}, self)
+
+	Library._CreateContentSection(themeTab, "Tema")
+
+	local themePresets = {
+		Default = {
+			AccentColor = Color3.fromRGB(255, 255, 255),
+			BackgroundColor = Color3.fromRGB(10, 10, 11),
+			SecondaryColor = Color3.fromRGB(25, 25, 27),
+			BorderColor = Color3.fromRGB(47, 47, 51),
+			TextColor = Color3.fromRGB(255, 255, 255),
+			MutedTextColor = Color3.fromRGB(155, 155, 162),
+			ScrollBarColor = Color3.fromRGB(82, 82, 88),
+		},
+		Blue = {
+			AccentColor = Color3.fromRGB(74, 171, 255),
+			BackgroundColor = Color3.fromRGB(9, 12, 18),
+			SecondaryColor = Color3.fromRGB(18, 27, 42),
+			BorderColor = Color3.fromRGB(48, 72, 105),
+			TextColor = Color3.fromRGB(240, 247, 255),
+			MutedTextColor = Color3.fromRGB(148, 170, 198),
+			ScrollBarColor = Color3.fromRGB(92, 133, 178),
+		},
+		Crimson = {
+			AccentColor = Color3.fromRGB(255, 68, 96),
+			BackgroundColor = Color3.fromRGB(14, 10, 12),
+			SecondaryColor = Color3.fromRGB(32, 18, 23),
+			BorderColor = Color3.fromRGB(83, 43, 52),
+			TextColor = Color3.fromRGB(255, 244, 246),
+			MutedTextColor = Color3.fromRGB(190, 143, 151),
+			ScrollBarColor = Color3.fromRGB(150, 76, 90),
+		},
+		Green = {
+			AccentColor = Color3.fromRGB(80, 220, 145),
+			BackgroundColor = Color3.fromRGB(8, 13, 11),
+			SecondaryColor = Color3.fromRGB(16, 31, 25),
+			BorderColor = Color3.fromRGB(42, 82, 64),
+			TextColor = Color3.fromRGB(238, 255, 247),
+			MutedTextColor = Color3.fromRGB(140, 184, 164),
+			ScrollBarColor = Color3.fromRGB(82, 150, 116),
+		},
+	}
+
+	Library._CreateDropdown(themeTab, {
+		Name = "Preset",
+		Options = { "Default", "Blue", "Crimson", "Green" },
+		Default = "Default",
+		Flag = "mithren_system_theme_preset",
+		Callback = function(selected)
+			local presetName = type(selected) == "table" and selected[1] or selected
+			local preset = themePresets[tostring(presetName or "")]
+			if preset then
+				self:SetTheme(preset)
+			end
+		end,
+	})
+
+	local colorRowA = Library._CreateRow(themeTab, { Columns = 3 })
+	colorRowA:CreateColorPicker({
+		Name = "Principal",
+		Default = self._theme.AccentColor,
+		Flag = "mithren_system_accent_color",
+		Callback = function(color)
+			self:SetTheme({ AccentColor = color })
+		end,
+	})
+	colorRowA:CreateColorPicker({
+		Name = "Fondo",
+		Default = self._theme.BackgroundColor,
+		Flag = "mithren_system_background_color",
+		Callback = function(color)
+			self:SetTheme({ BackgroundColor = color })
+		end,
+	})
+	colorRowA:CreateColorPicker({
+		Name = "Panel",
+		Default = self._theme.SecondaryColor,
+		Flag = "mithren_system_secondary_color",
+		Callback = function(color)
+			self:SetTheme({ SecondaryColor = color })
+		end,
+	})
+
+	local colorRowB = Library._CreateRow(themeTab, { Columns = 3 })
+	colorRowB:CreateColorPicker({
+		Name = "Bordes",
+		Default = self._theme.BorderColor,
+		Flag = "mithren_system_border_color",
+		Callback = function(color)
+			self:SetTheme({ BorderColor = color })
+		end,
+	})
+	colorRowB:CreateColorPicker({
+		Name = "Texto",
+		Default = self._theme.TextColor,
+		Flag = "mithren_system_text_color",
+		Callback = function(color)
+			self:SetTheme({ TextColor = color })
+		end,
+	})
+	colorRowB:CreateColorPicker({
+		Name = "Texto secundario",
+		Default = self._theme.MutedTextColor,
+		Flag = "mithren_system_muted_text_color",
+		Callback = function(color)
+			self:SetTheme({ MutedTextColor = color })
+		end,
+	})
+
+	Library._CreateColorPicker(themeTab, {
+		Name = "Scroll",
+		Default = self._theme.ScrollBarColor,
+		Flag = "mithren_system_scroll_color",
+		Callback = function(color)
+			self:SetTheme({ ScrollBarColor = color })
+		end,
+	})
+
+	local transparencyRow = Library._CreateRow(themeTab, { Columns = 2 })
+	transparencyRow:CreateSlider({
+		Name = "Transparencia panel",
+		Min = 0,
+		Max = 90,
+		Default = math.floor((self._theme.PanelTransparency or 0.03) * 100 + 0.5),
+		Flag = "mithren_system_panel_transparency",
+		Callback = function(value)
+			self:SetTheme({ PanelTransparency = (tonumber(value) or 0) / 100 })
+		end,
+	})
+	transparencyRow:CreateSlider({
+		Name = "Transparencia elementos",
+		Min = 0,
+		Max = 90,
+		Default = math.floor((self._theme.ElementTransparency or self._elementTransparency or 0.18) * 100 + 0.5),
+		Flag = "mithren_system_element_transparency",
+		Callback = function(value)
+			self:SetTheme({ ElementTransparency = (tonumber(value) or 0) / 100 })
+		end,
+	})
+
+	Library._CreateContentSection(themeTab, "Fondo")
+	local backgroundRow = Library._CreateRow(themeTab, { Columns = 2 })
+	backgroundRow:CreateToggle({
+		Name = "Imagen de fondo",
+		Default = self._theme.BackgroundImageEnabled == true,
+		Flag = "mithren_system_background_enabled",
+		Callback = function(enabled)
+			self:SetTheme({ BackgroundImageEnabled = enabled == true })
+		end,
+	})
+	backgroundRow:CreateSlider({
+		Name = "Oscurecer",
+		Min = 0,
+		Max = 90,
+		Default = math.floor((self._theme.BackgroundDim or 0.45) * 100 + 0.5),
+		Flag = "mithren_system_background_dim",
+		Callback = function(value)
+			self:SetTheme({ BackgroundDim = (tonumber(value) or 0) / 100 })
+		end,
+	})
+
+	Library._CreateTextBox(themeTab, {
+		Name = "Imagen",
+		Default = self._theme.BackgroundImage or "",
+		Placeholder = "rbxassetid://...",
+		Flag = "mithren_system_background_image",
+		Callback = function(text)
+			self:SetTheme({ BackgroundImage = tostring(text or "") })
+		end,
+	})
+
+	Library._CreateToggle(themeTab, {
+		Name = "Acrylic blur",
+		Default = self._theme.AcrylicBlurEnabled == true,
+		Flag = "mithren_system_acrylic_blur",
+		Callback = function(enabled)
+			self:SetTheme({ AcrylicBlurEnabled = enabled == true })
+		end,
+	})
+
+	Library._CreateButton(themeTab, {
+		Name = "Reset tema",
+		Icon = "rotate-ccw",
+		Callback = function()
+			self:ResetTheme()
+		end,
+	})
+
+	Library._CreateConfigSection(savesTab, {
+		Title = "Guardados",
+		ShowHelp = true,
+		ShowAdvanced = true,
+		ShowAutoSave = true,
+		ShowUiKeybind = false,
+	})
+
+	return self.systemTabs
+end
+
 function Library._CreateConfigSection(tab, config)
 	local lib = tab._library
 	config = config or {}
@@ -5730,149 +6404,6 @@ function Library._CreateConfigSection(tab, config)
 			configDropdown:Refresh(lib:GetConfigs())
 		end,
 	}
-end
-
-local MithrenInternalTestEnabled = rawget(_G, "MithrenTestEnabled") == true
-
-local function RunMithrenInternalTest()
-	pcall(function()
-		local oldWindow = rawget(_G, "MithrenInternalTestWindow")
-		if oldWindow and type(oldWindow.Destroy) == "function" then
-			oldWindow:Destroy()
-		end
-	end)
-
-	local testAccent = Color3.fromRGB(79, 195, 247)
-	local window = Library:Window({
-		Title = "Mithren Test",
-		ConfigFolder = "MithrenInternalTest",
-		Version = "row-test",
-	})
-
-	_G.MithrenInternalTestWindow = window
-	window:SetToggleKey(Enum.KeyCode.RightControl)
-
-	local principal = window:CreateSection("Principal")
-	local config = window:CreateSection("Config")
-
-	local rows = principal:CreateTab("Filas", "columns-3")
-	local settings = config:CreateTab("Config", "settings")
-
-	local function addTestElement(row, itemType, suffix)
-		if itemType == "Button" then
-			row:CreateButton({
-				Name = "Boton",
-				Icon = "play",
-				Callback = function()
-					window:Notify({
-						Title = "Mithren",
-						Description = "Boton de test",
-						Duration = 2,
-						Icon = "check",
-					})
-				end,
-			})
-		elseif itemType == "Toggle" then
-			row:CreateToggle({
-				Name = "Toggle",
-				Default = false,
-				Flag = "mithren_test_toggle_" .. suffix,
-				Callback = function() end,
-			})
-		elseif itemType == "Slider" then
-			row:CreateSlider({
-				Name = "Slider",
-				Min = 0,
-				Max = 100,
-				Default = 35,
-				Flag = "mithren_test_slider_" .. suffix,
-				Callback = function() end,
-			})
-		elseif itemType == "Dropdown" then
-			row:CreateDropdown({
-				Name = "Select",
-				Options = { "Uno", "Dos", "Tres" },
-				Default = "Uno",
-				Flag = "mithren_test_dropdown_" .. suffix,
-				Callback = function() end,
-			})
-		elseif itemType == "Keybind" then
-			row:CreateKeybind({
-				Name = "Keybind",
-				Default = Enum.KeyCode.F,
-				Flag = "mithren_test_keybind_" .. suffix,
-				Callback = function() end,
-			})
-		elseif itemType == "ColorPicker" then
-			row:CreateColorPicker({
-				Name = "Color",
-				Default = testAccent,
-				Flag = "mithren_test_color_" .. suffix,
-				Callback = function(color)
-					window:SetAccentColor(color)
-				end,
-			})
-		elseif itemType == "Bubble" then
-			row:CreateBubble({
-				Name = "Bubble",
-				Default = true,
-				Flag = "mithren_test_bubble_" .. suffix,
-				BubbleText = "B",
-				Activated = function() end,
-			})
-		elseif itemType == "TextBox" then
-			row:CreateTextBox({
-				Name = "Texto",
-				Default = "",
-				Placeholder = "Input",
-				Flag = "mithren_test_textbox_" .. suffix,
-				Callback = function() end,
-			})
-		end
-	end
-
-	local function addComponentRows(columns, title, suffix)
-		rows:CreateSection(title)
-		local items = {
-			"Button",
-			"Toggle",
-			"Slider",
-			"Dropdown",
-			"Keybind",
-			"ColorPicker",
-			"Bubble",
-			"TextBox",
-		}
-
-		local index = 1
-		while index <= #items do
-			local row = rows:CreateRow(columns)
-			for _ = 1, columns do
-				local itemType = items[index]
-				if itemType then
-					addTestElement(row, itemType, suffix .. "_" .. tostring(index))
-				end
-				index += 1
-			end
-		end
-	end
-
-	addComponentRows(1, "1 componente por fila", "one")
-	addComponentRows(2, "2 componentes por fila", "two")
-	addComponentRows(3, "3 componentes por fila", "three")
-
-	settings:CreateConfigSection({
-		Title = "Saves",
-		ShowHelp = true,
-		ShowAdvanced = true,
-		ShowAutoSave = true,
-	})
-
-	return window
-end
-
-if MithrenInternalTestEnabled then
-	RunMithrenInternalTest()
 end
 
 _G.MithrenLibrary = Library

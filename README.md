@@ -1,6 +1,12 @@
 # Mithren
 
-Mithren es una libreria UI para Roblox/Luau pensada para executors. El archivo principal es `Mithren.lua`.
+Mithren es una libreria UI para Roblox/Luau pensada para executors.
+
+## Estructura
+
+- `main.lua`: libreria principal.
+- `example.lua`: UI de ejemplo/test para probar componentes.
+- `README.md`: documentacion rapida.
 
 ## Cargar
 
@@ -25,6 +31,14 @@ local UI = Mithren:Window({
 ```lua
 UI:SetVersionTag("v1.0.1")
 ```
+
+Mithren crea siempre una seccion interna `Ajustes` con tres tabs estandar:
+
+- `Ajustes`: idioma y tecla para abrir/cerrar UI.
+- `Tema`: preset, colores, transparencias, fondo y reset.
+- `Guardados`: saves, autosave, importar/exportar.
+
+Puedes acceder a esos tabs desde `UI.systemTabs`.
 
 ## Sections Y Tabs
 
@@ -82,11 +96,12 @@ Tab:Section("Separador")
 
 ## Idioma
 
-El selector de idioma es opcional.
+El selector de idioma es opcional. Si necesitas varios idiomas para un script publico, evita meter todos los textos en el script principal: usa `Localization` para cargar solo el pack del usuario y cachearlo.
 
 ```lua
 local UI = Mithren:Window({
     Title = "Mi Script",
+    ConfigFolder = "MiScript",
     LanguageSelector = {
         Default = "es",
         Options = {
@@ -97,7 +112,45 @@ local UI = Mithren:Window({
             print(language)
         end,
     },
+    Localization = {
+        AutoDetect = true,
+        Fallback = "en",
+        BaseUrl = "https://raw.githubusercontent.com/usuario/repo/main/lang",
+        Cache = true,
+        Restart = {
+            Url = "https://raw.githubusercontent.com/usuario/repo/main/main.lua",
+        },
+        Messages = {
+            es = {
+                RestartTitle = "Reinicio necesario",
+                RestartDescription = "El idioma cambio. Reinicia el script para aplicar todos los textos.",
+                RestartLater = "Luego",
+                RestartNow = "Reiniciar",
+            },
+        },
+    },
 })
+
+Tab:Button(UI:T("farm.start", "Iniciar farm"), function()
+    print(UI:T("farm.started", "Farm iniciado"))
+end)
+```
+
+Los packs remotos deben ser JSON simples:
+
+```json
+{
+  "farm.start": "Start farm",
+  "farm.started": "Farm started"
+}
+```
+
+## Example
+
+`example.lua` contiene la UI de prueba que antes vivia dentro de la libreria principal.
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Ryshub/Mithren/main/example.lua"))()
 ```
 
 ## Saves / Config
@@ -134,15 +187,6 @@ UI:SetTheme({
 })
 
 UI:ResetTheme()
-```
-
-## Test UI
-
-El test UI no se activa solo. Para probarlo:
-
-```lua
-_G.MithrenTestMode = true
-loadstring(game:HttpGet("<URL_RAW>"))()
 ```
 
 ## API Clasica
