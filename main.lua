@@ -6006,55 +6006,6 @@ function Library:_CreateSystemTabs()
 
 	Library._CreateContentSection(settingsTab, "Ajustes")
 
-	local function normalizeLanguageOption(option)
-		if type(option) == "table" then
-			local value = option.Value or option.Code or option.Id or option.Name or option.Label or option[1]
-			local label = option.Label or option.Name or option.Title or value
-			return {
-				Label = tostring(label or ""),
-				Value = value ~= nil and value or label,
-			}
-		end
-		return {
-			Label = tostring(option or ""),
-			Value = option,
-		}
-	end
-
-	local languageOptions = {}
-	local languageByLabel = {}
-	if type(self._languageOptions) == "table" then
-		for _, rawOption in ipairs(self._languageOptions) do
-			local option = normalizeLanguageOption(rawOption)
-			if option.Label ~= "" then
-				table.insert(languageOptions, option.Label)
-				languageByLabel[option.Label] = option.Value
-			end
-		end
-	end
-
-	if #languageOptions > 0 then
-		local currentLanguageLabel = languageOptions[1]
-		for label, value in pairs(languageByLabel) do
-			if value == self._language or label == tostring(self._language) then
-				currentLanguageLabel = label
-				break
-			end
-		end
-
-		Library._CreateDropdown(settingsTab, {
-			Name = "Idioma",
-			Options = languageOptions,
-			Default = currentLanguageLabel,
-			Flag = "mithren_system_language",
-			Callback = function(selected)
-				local label = type(selected) == "table" and (selected[1] or selected.Label or selected.Value) or selected
-				local value = languageByLabel[tostring(label)] or label
-				self:SetLanguage(value)
-			end,
-		})
-	end
-
 	Library._CreateKeybind(settingsTab, {
 		Name = "Abrir/cerrar UI",
 		Default = self:GetToggleKey(),
