@@ -8,7 +8,7 @@ local hs = game:GetService("HttpService")
 local lcs = game:GetService("LocalizationService")
 
 local n = "Mithren"
-local MITHREN_VERSION = "v2.0.1"
+local MITHREN_VERSION = "v2.0.2"
 local CONFIG_ROOT = "MithrenConfigs_" .. MITHREN_VERSION:gsub("[^%w_%-]", "_")
 
 local c = {
@@ -1808,14 +1808,14 @@ function Library:T(key, fallback, ...)
 	return tostring(text)
 end
 
-function Library:PromptRestart(config)
+function Library:_PromptAction(promptKey, config)
 	config = type(config) == "table" and config or {}
-	if self._restartPrompt and self._restartPrompt.Parent then
-		self._restartPrompt:Destroy()
+	if promptKey and self[promptKey] and self[promptKey].Parent then
+		self[promptKey]:Destroy()
 	end
 	local c = self._c or c
 	local overlay = CreateInstance("Frame", {
-		Name = "RestartPrompt",
+		Name = config.Name or "ActionPrompt",
 		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
 		BackgroundTransparency = 0.42,
 		Size = UDim2.fromScale(1, 1),
@@ -1839,7 +1839,7 @@ function Library:PromptRestart(config)
 		Name = "Title",
 		BackgroundTransparency = 1,
 		FontFace = f.Bold,
-		Text = config.Title or "Restart required",
+		Text = config.Title or "Confirm action",
 		TextColor3 = c.Text,
 		TextSize = textsize.Title,
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -1851,8 +1851,7 @@ function Library:PromptRestart(config)
 		Name = "Description",
 		BackgroundTransparency = 1,
 		FontFace = f.Regular,
-		Text = config.Description
-			or "The language changed. Restart the script to apply every label cleanly.",
+		Text = config.Description or "",
 		TextColor3 = c.TextDark,
 		TextSize = textsize.Small,
 		TextWrapped = true,
@@ -1899,14 +1898,48 @@ function Library:PromptRestart(config)
 
 	CreateModalButton(config.CancelText or "Later", false, function()
 		overlay:Destroy()
+		if type(config.OnCancel) == "function" then
+			config.OnCancel()
+		end
 	end)
-	CreateModalButton(config.RestartText or "Restart", true, function()
+	CreateModalButton(config.ConfirmText or "Confirm", true, function()
 		overlay:Destroy()
-		self:Restart()
+		if type(config.OnConfirm) == "function" then
+			config.OnConfirm()
+		end
 	end)
 
-	self._restartPrompt = overlay
+	if promptKey then
+		self[promptKey] = overlay
+	end
 	return overlay
+end
+
+function Library:PromptRestart(config)
+	config = type(config) == "table" and config or {}
+	config.Name = config.Name or "RestartPrompt"
+	config.Title = config.Title or "Restart required"
+	config.Description = config.Description
+		or "The language changed. Restart the script to apply every label cleanly."
+	config.CancelText = config.CancelText or "Later"
+	config.ConfirmText = config.RestartText or config.ConfirmText or "Restart"
+	config.OnConfirm = config.OnConfirm or function()
+		self:Restart()
+	end
+	return self:_PromptAction("_restartPrompt", config)
+end
+
+function Library:PromptClose(config)
+	config = type(config) == "table" and config or {}
+	config.Name = config.Name or "ClosePrompt"
+	config.Title = config.Title or "Close script?"
+	config.Description = config.Description or "This will close the current UI and stop active runtime features."
+	config.CancelText = config.CancelText or "Cancel"
+	config.ConfirmText = config.ConfirmText or "Close"
+	config.OnConfirm = config.OnConfirm or function()
+		self:Destroy()
+	end
+	return self:_PromptAction("_closePrompt", config)
 end
 
 function Library:Restart()
@@ -2749,7 +2782,7 @@ function Library:_Createv0rtexdControls()
 	ApplyLucideIcon(closeBtn, "x", "x", 48)
 
 	closeBtn.MouseButton1Click:Connect(function()
-		self:Destroy()
+		self:PromptClose()
 	end)
 
 	closeBtn.MouseEnter:Connect(function()
