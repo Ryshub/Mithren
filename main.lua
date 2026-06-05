@@ -8,8 +8,9 @@ local hs = game:GetService("HttpService")
 local lcs = game:GetService("LocalizationService")
 
 local n = "Mithren"
-local MITHREN_VERSION = "v2.0.4"
-local CONFIG_ROOT = "MithrenConfigs_" .. MITHREN_VERSION:gsub("[^%w_%-]", "_")
+local MITHREN_VERSION = "v2.0.5"
+local CONFIG_SCHEMA_VERSION = "v2.0.0"
+local CONFIG_ROOT = "MithrenConfigs_" .. CONFIG_SCHEMA_VERSION:gsub("[^%w_%-]", "_")
 
 local c = {
 	Background = Color3.fromRGB(10, 10, 11),
