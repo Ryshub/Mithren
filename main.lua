@@ -8,7 +8,7 @@ local hs = game:GetService("HttpService")
 local lcs = game:GetService("LocalizationService")
 
 local n = "Mithren"
-local MITHREN_VERSION = "v2.0.2"
+local MITHREN_VERSION = "v2.0.3"
 local CONFIG_ROOT = "MithrenConfigs_" .. MITHREN_VERSION:gsub("[^%w_%-]", "_")
 
 local c = {
@@ -992,6 +992,29 @@ local function NormalizeLanguageCode(language)
 	return code or ""
 end
 
+local LANGUAGE_DISPLAY_NAMES = {
+	ar = "Arabic",
+	de = "German",
+	en = "English",
+	es = "Spanish",
+	fr = "French",
+	it = "Italian",
+	ja = "Japanese",
+	ko = "Korean",
+	pt = "Portuguese",
+	ru = "Russian",
+	tr = "Turkish",
+	zh = "Chinese",
+}
+
+local function GetLanguageDisplayName(value, fallback)
+	local code = NormalizeLanguageCode(value)
+	if code ~= "" and LANGUAGE_DISPLAY_NAMES[code] then
+		return LANGUAGE_DISPLAY_NAMES[code]
+	end
+	return tostring(fallback or value or "")
+end
+
 local function GetSystemLanguageCode(fallback)
 	local ok, locale = pcall(function()
 		return lcs.SystemLocaleId
@@ -1008,13 +1031,13 @@ local function NormalizeLanguageOption(option)
 		local value = option.Value or option.Code or option.Id or option.Name or option.Label or option[1]
 		local label = option.Label or option.Name or option.Title or value
 		return {
-			Label = tostring(label or ""),
+			Label = GetLanguageDisplayName(value, label),
 			Value = value ~= nil and tostring(value) or tostring(label or ""),
 			Raw = option,
 		}
 	end
 	return {
-		Label = tostring(option or ""),
+		Label = GetLanguageDisplayName(option, option),
 		Value = tostring(option or ""),
 		Raw = option,
 	}
