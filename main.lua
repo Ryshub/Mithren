@@ -1932,7 +1932,19 @@ function Library:Restart()
 			NotifyRestartError(compileError or "Could not compile restart source.")
 			return false
 		end
-		self:Destroy()
+		local destroyOk, destroyError = pcall(function()
+			self:Destroy()
+		end)
+		if not destroyOk then
+			warn("[Mithren] Script destroy hook failed: " .. tostring(destroyError))
+			local baseDestroyOk, baseDestroyError = pcall(function()
+				Library.Destroy(self)
+			end)
+			if not baseDestroyOk then
+				NotifyRestartError("Could not close current UI: " .. tostring(baseDestroyError))
+				return false
+			end
+		end
 		task.defer(function()
 			local ok, runError = pcall(runner)
 			if not ok then
