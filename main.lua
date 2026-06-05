@@ -30,6 +30,80 @@ local c = {
 	},
 }
 
+local SKY_PRESETS = {
+	["Sunset"] = {
+		Bk = "rbxassetid://271042233",
+		Dn = "rbxassetid://271042233",
+		Ft = "rbxassetid://271042233",
+		Lf = "rbxassetid://271042233",
+		Rt = "rbxassetid://271042233",
+		Up = "rbxassetid://271042596",
+		Brightness = 1.5,
+		ClockTime = 17,
+		FogEnd = 100000,
+	},
+	["Starry night"] = {
+		Bk = "rbxassetid://1012887",
+		Dn = "rbxassetid://1012890",
+		Ft = "rbxassetid://1012885",
+		Lf = "rbxassetid://1012889",
+		Rt = "rbxassetid://1012886",
+		Up = "rbxassetid://1012888",
+		StarCount = 5000,
+		Brightness = 0.3,
+		ClockTime = 0,
+		FogEnd = 100000,
+	},
+	["Clear day"] = {
+		Bk = "rbxassetid://600830446",
+		Dn = "rbxassetid://600830446",
+		Ft = "rbxassetid://600830446",
+		Lf = "rbxassetid://600830446",
+		Rt = "rbxassetid://600830446",
+		Up = "rbxassetid://600830446",
+		Brightness = 3,
+		ClockTime = 14,
+		FogEnd = 100000,
+	},
+	["Deep space"] = {
+		Bk = "rbxassetid://159454286",
+		Dn = "rbxassetid://159454299",
+		Ft = "rbxassetid://159454293",
+		Lf = "rbxassetid://159454296",
+		Rt = "rbxassetid://159454300",
+		Up = "rbxassetid://159454288",
+		StarCount = 8000,
+		Brightness = 0.1,
+		ClockTime = 0,
+		FogEnd = 100000,
+	},
+	["Soft pink"] = {
+		Bk = "rbxassetid://271042596",
+		Dn = "rbxassetid://271042596",
+		Ft = "rbxassetid://271042596",
+		Lf = "rbxassetid://271042596",
+		Rt = "rbxassetid://271042596",
+		Up = "rbxassetid://271042233",
+		Brightness = 1.8,
+		ClockTime = 18,
+		FogEnd = 100000,
+	},
+	["Storm"] = {
+		Bk = "rbxassetid://151165214",
+		Dn = "rbxassetid://151165214",
+		Ft = "rbxassetid://151165214",
+		Lf = "rbxassetid://151165214",
+		Rt = "rbxassetid://151165214",
+		Up = "rbxassetid://151165214",
+		Brightness = 0.8,
+		ClockTime = 3,
+		FogEnd = 100000,
+	},
+}
+
+local SKY_OPTIONS = { "Sunset", "Starry night", "Clear day", "Deep space", "Soft pink", "Storm" }
+local activeSkyOwner
+
 local function ClonePalette(palette)
 	local copy = {}
 	for key, value in pairs(palette) do
@@ -1342,6 +1416,8 @@ function Library.new(title, configFolder, config)
 		BackgroundImageEnabled = false,
 		BackgroundDim = 0.45,
 		AcrylicBlurEnabled = self._acrylicBlurEnabled,
+		SkyEnabled = false,
+		SkyPreset = "Starry night",
 	}
 	if self._localization then
 		if self._localization.Fallback and self._localization.Fallback ~= self._language then
@@ -2775,6 +2851,127 @@ function Library:SetAcrylicBlurEnabled(enabled)
 	self._acrylicBlur:SetEnabled(self._visible and not self.minimized)
 end
 
+function Library:_NormalizeSkyPreset(preset)
+	preset = tostring(preset or "")
+	local aliases = {
+		["Atardecer"] = "Sunset",
+		["Noche estrellada"] = "Starry night",
+		["Dia claro"] = "Clear day",
+		["Día claro"] = "Clear day",
+		["Espacio profundo"] = "Deep space",
+		["Rosa suave"] = "Soft pink",
+		["Tormenta"] = "Storm",
+	}
+	preset = aliases[preset] or preset
+	return SKY_PRESETS[preset] and preset or "Starry night"
+end
+
+function Library:_CaptureOriginalSky()
+	if self._originalSkyState then
+		return
+	end
+
+	self._originalSkyState = {
+		Brightness = lg.Brightness,
+		ClockTime = lg.ClockTime,
+		FogEnd = lg.FogEnd,
+		Skies = {},
+	}
+
+	for _, child in ipairs(lg:GetChildren()) do
+		if child:IsA("Sky") then
+			local ok, clone = pcall(function()
+				return child:Clone()
+			end)
+			if ok and clone then
+				table.insert(self._originalSkyState.Skies, clone)
+			end
+		end
+	end
+end
+
+function Library:_ClearSkies()
+	for _, child in ipairs(lg:GetChildren()) do
+		if child:IsA("Sky") then
+			child:Destroy()
+		end
+	end
+end
+
+function Library:_RestoreOriginalSky()
+	if not self._originalSkyState then
+		self._skyApplied = false
+		if activeSkyOwner == self then
+			activeSkyOwner = nil
+		end
+		return
+	end
+
+	self:_ClearSkies()
+	lg.Brightness = self._originalSkyState.Brightness
+	lg.ClockTime = self._originalSkyState.ClockTime
+	lg.FogEnd = self._originalSkyState.FogEnd
+
+	for _, sky in ipairs(self._originalSkyState.Skies) do
+		local ok, clone = pcall(function()
+			return sky:Clone()
+		end)
+		if ok and clone then
+			clone.Parent = lg
+		end
+	end
+
+	self._skyApplied = false
+	if activeSkyOwner == self then
+		activeSkyOwner = nil
+	end
+end
+
+function Library:SetSky(enabled, preset)
+	local presetName = self:_NormalizeSkyPreset(preset or self._theme.SkyPreset)
+	local isEnabled = enabled == true
+	self._theme.SkyEnabled = isEnabled
+	self._theme.SkyPreset = presetName
+
+	if not isEnabled then
+		if self._skyApplied then
+			self:_RestoreOriginalSky()
+		end
+		return
+	end
+
+	if activeSkyOwner and activeSkyOwner ~= self and type(activeSkyOwner._RestoreOriginalSky) == "function" then
+		activeSkyOwner:_RestoreOriginalSky()
+	end
+
+	local skyData = SKY_PRESETS[presetName]
+	if not skyData then
+		return
+	end
+
+	self:_CaptureOriginalSky()
+	self:_ClearSkies()
+
+	local sky = Instance.new("Sky")
+	sky.Name = "MithrenCustomSky"
+	sky.SkyboxBk = skyData.Bk
+	sky.SkyboxDn = skyData.Dn
+	sky.SkyboxFt = skyData.Ft
+	sky.SkyboxLf = skyData.Lf
+	sky.SkyboxRt = skyData.Rt
+	sky.SkyboxUp = skyData.Up
+	sky.StarCount = skyData.StarCount or 3000
+	sky.SunAngularSize = skyData.SunSize or 10
+	sky.MoonAngularSize = skyData.MoonSize or 8
+	sky.Parent = lg
+
+	lg.Brightness = skyData.Brightness or 2
+	lg.ClockTime = skyData.ClockTime or 12
+	lg.FogEnd = skyData.FogEnd or 100000
+	self._skyApplied = true
+	activeSkyOwner = self
+end
+
 function Library:_RefreshCurrentTabStyle()
 	local c = self._c or c
 	if not self.currentTab then
@@ -2927,6 +3124,14 @@ function Library:SetTheme(theme)
 			theme.BackgroundImageEnabled == true,
 			theme.BackgroundDim or self._theme.BackgroundDim
 		)
+	end
+
+	if theme.SkyEnabled ~= nil or theme.SkyPreset ~= nil then
+		local skyEnabled = theme.SkyEnabled
+		if skyEnabled == nil then
+			skyEnabled = self._theme.SkyEnabled
+		end
+		self:SetSky(skyEnabled == true, theme.SkyPreset or self._theme.SkyPreset)
 	end
 
 	if self.container then
@@ -3144,6 +3349,8 @@ function Library:ResetTheme()
 		BackgroundImageEnabled = false,
 		BackgroundDim = 0.45,
 		AcrylicBlurEnabled = false,
+		SkyEnabled = false,
+		SkyPreset = "Starry night",
 	})
 end
 
@@ -3302,6 +3509,9 @@ function Library:Destroy()
 	if self._acrylicBlur then
 		self._acrylicBlur:Destroy()
 		self._acrylicBlur = nil
+	end
+	if self._skyApplied then
+		self:_RestoreOriginalSky()
 	end
 	if self._notificationContainer then
 		self._notificationContainer:Destroy()
@@ -6104,6 +6314,7 @@ function Library:_CreateSystemTabs()
 	}
 
 	local themeColorPickers = {}
+	local themeSkyControls = {}
 	local function syncThemeColorPickers(theme)
 		theme = theme or self:GetTheme()
 		local pickerMap = {
@@ -6119,6 +6330,15 @@ function Library:_CreateSystemTabs()
 			if picker and typeof(theme[key]) == "Color3" and type(picker.SetColor) == "function" then
 				picker:SetColor(theme[key])
 			end
+		end
+	end
+	local function syncThemeSkyControls(theme)
+		theme = theme or self:GetTheme()
+		if themeSkyControls.Enabled and type(themeSkyControls.Enabled.SetValue) == "function" then
+			themeSkyControls.Enabled:SetValue(theme.SkyEnabled == true)
+		end
+		if themeSkyControls.Preset and type(themeSkyControls.Preset.SetValue) == "function" then
+			themeSkyControls.Preset:SetValue(self:_NormalizeSkyPreset(theme.SkyPreset))
 		end
 	end
 
@@ -6260,12 +6480,34 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 
+	Library._CreateContentSection(themeTab, "Sky")
+	local skyRow = Library._CreateRow(themeTab, { Columns = 2 })
+	themeSkyControls.Enabled = skyRow:CreateToggle({
+		Name = "Custom sky",
+		Default = self._theme.SkyEnabled == true,
+		Flag = "mithren_system_sky_enabled",
+		Callback = function(enabled)
+			self:SetTheme({ SkyEnabled = enabled == true })
+		end,
+	})
+	themeSkyControls.Preset = skyRow:CreateDropdown({
+		Name = "Sky preset",
+		Options = SKY_OPTIONS,
+		Default = self:_NormalizeSkyPreset(self._theme.SkyPreset),
+		Flag = "mithren_system_sky_preset",
+		Callback = function(selected)
+			local presetName = type(selected) == "table" and selected[1] or selected
+			self:SetTheme({ SkyPreset = presetName })
+		end,
+	})
+
 	Library._CreateButton(themeTab, {
 		Name = "Reset theme",
 		Icon = "rotate-ccw",
 		Callback = function()
 			self:ResetTheme()
 			syncThemeColorPickers()
+			syncThemeSkyControls()
 		end,
 	})
 
