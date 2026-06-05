@@ -1834,7 +1834,7 @@ function Library:PromptRestart(config)
 		Name = "Title",
 		BackgroundTransparency = 1,
 		FontFace = f.Bold,
-		Text = config.Title or self:_GetLocalizationMessage("RestartTitle", "Restart required"),
+		Text = config.Title or "Restart required",
 		TextColor3 = c.Text,
 		TextSize = textsize.Title,
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -1847,7 +1847,7 @@ function Library:PromptRestart(config)
 		BackgroundTransparency = 1,
 		FontFace = f.Regular,
 		Text = config.Description
-			or self:_GetLocalizationMessage("RestartDescription", "The language pack was changed. Restart the script to apply everything cleanly."),
+			or "The language changed. Restart the script to apply every label cleanly.",
 		TextColor3 = c.TextDark,
 		TextSize = textsize.Small,
 		TextWrapped = true,
@@ -1892,10 +1892,10 @@ function Library:PromptRestart(config)
 		return button
 	end
 
-	CreateModalButton(config.CancelText or self:_GetLocalizationMessage("RestartLater", "Later"), false, function()
+	CreateModalButton(config.CancelText or "Later", false, function()
 		overlay:Destroy()
 	end)
-	CreateModalButton(config.RestartText or self:_GetLocalizationMessage("RestartNow", "Restart"), true, function()
+	CreateModalButton(config.RestartText or "Restart", true, function()
 		overlay:Destroy()
 		self:Restart()
 	end)
@@ -1908,6 +1908,38 @@ function Library:Restart()
 	local restart = self._restartConfig
 	if type(restart) == "function" then
 		return restart(self)
+	end
+	local function NotifyRestartError(description)
+		self:Notify({
+			Title = "Restart",
+			Description = tostring(description or "No restart action was configured for this script."),
+			Duration = 4,
+			Icon = "refresh-cw",
+			Force = true,
+		})
+	end
+	local function RunSource(source)
+		if type(source) ~= "string" or source == "" then
+			NotifyRestartError("No restart source is available.")
+			return false
+		end
+		if not loadstring then
+			NotifyRestartError("loadstring is not available in this executor.")
+			return false
+		end
+		local runner, compileError = loadstring(source)
+		if type(runner) ~= "function" then
+			NotifyRestartError(compileError or "Could not compile restart source.")
+			return false
+		end
+		self:Destroy()
+		task.defer(function()
+			local ok, runError = pcall(runner)
+			if not ok then
+				warn("[Mithren] Restart failed: " .. tostring(runError))
+			end
+		end)
+		return true
 	end
 	if type(restart) == "table" then
 		local callback = restart.Callback or restart.Function or restart.Reexecute
@@ -1924,45 +1956,11 @@ function Library:Restart()
 				source = result
 			end
 		end
-		if type(source) == "string" and source ~= "" and loadstring then
-			local runner, compileError = loadstring(source)
-			if type(runner) == "function" then
-				self:Destroy()
-				task.defer(runner)
-				return true
-			end
-			self:Notify({
-				Title = self:_GetLocalizationMessage("RestartUnavailableTitle", "Restart"),
-				Description = tostring(compileError or self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script.")),
-				Duration = 3,
-				Icon = "refresh-cw",
-				Force = true,
-			})
-			return false
-		end
-	elseif type(restart) == "string" and restart ~= "" and loadstring then
-		local runner, compileError = loadstring(restart)
-		if type(runner) == "function" then
-			self:Destroy()
-			task.defer(runner)
-			return true
-		end
-		self:Notify({
-			Title = self:_GetLocalizationMessage("RestartUnavailableTitle", "Restart"),
-			Description = tostring(compileError or self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script.")),
-			Duration = 3,
-			Icon = "refresh-cw",
-			Force = true,
-		})
-		return false
+		return RunSource(source)
+	elseif type(restart) == "string" then
+		return RunSource(restart)
 	end
-	self:Notify({
-		Title = self:_GetLocalizationMessage("RestartUnavailableTitle", "Restart"),
-		Description = self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script."),
-		Duration = 3,
-		Icon = "refresh-cw",
-		Force = true,
-	})
+	NotifyRestartError("No restart action was configured for this script.")
 	return false
 end
 
