@@ -927,6 +927,38 @@ local function GetSystemLanguageCode(fallback)
 	return code ~= "" and code or "en"
 end
 
+local function NormalizeLanguageOption(option)
+	if type(option) == "table" then
+		local value = option.Value or option.Code or option.Id or option.Name or option.Label or option[1]
+		local label = option.Label or option.Name or option.Title or value
+		return {
+			Label = tostring(label or ""),
+			Value = value ~= nil and tostring(value) or tostring(label or ""),
+			Raw = option,
+		}
+	end
+	return {
+		Label = tostring(option or ""),
+		Value = tostring(option or ""),
+		Raw = option,
+	}
+end
+
+local function ResolveLanguageValue(language, options)
+	local rawOption = NormalizeLanguageOption(language)
+	local rawValue = rawOption.Value
+	local rawLabel = rawOption.Label
+	if type(options) == "table" then
+		for _, option in ipairs(options) do
+			local normalized = NormalizeLanguageOption(option)
+			if normalized.Value == rawValue or normalized.Label == rawValue or normalized.Value == rawLabel or normalized.Label == rawLabel then
+				return normalized.Value, normalized
+			end
+		end
+	end
+	return rawValue, rawOption
+end
+
 local function GetLanguageCachePath(configFolder, language)
 	return GetConfigRoot(configFolder) .. "/localization_" .. SanitizeConfigName(language) .. ".json"
 end
@@ -1286,6 +1318,9 @@ function Library.new(title, configFolder, config)
 	local savedLanguage = ReadJsonFile(GetConfigPath(self.configFolder, "__language"))
 	if type(savedLanguage) == "table" and savedLanguage.Language ~= nil then
 		languageDefault = savedLanguage.Language
+	end
+	if languageDefault ~= nil and self._languageOptions then
+		languageDefault = ResolveLanguageValue(languageDefault, self._languageOptions)
 	end
 	self._language = languageDefault
 	self._localization = nil
@@ -1648,6 +1683,13 @@ function Library:LoadLanguage(language, forceRefresh)
 		end
 		return true, pack, "remote"
 	end
+	if localization.Cache then
+		local cached = self:_NormalizeLocalizationPack(ReadJsonFile(cachePath))
+		if cached then
+			localization.Translations[language] = cached
+			return true, cached, "cache"
+		end
+	end
 	return false
 end
 
@@ -1794,12 +1836,34 @@ function Library:Restart()
 			end
 		end
 		if type(source) == "string" and source ~= "" and loadstring then
-			self:Destroy()
-			return loadstring(source)()
+			local runner, compileError = loadstring(source)
+			if type(runner) == "function" then
+				self:Destroy()
+				task.defer(runner)
+				return true
+			end
+			self:Notify({
+				Title = self:_GetLocalizationMessage("RestartUnavailableTitle", "Restart"),
+				Description = tostring(compileError or self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script.")),
+				Duration = 3,
+				Icon = "refresh-cw",
+			})
+			return false
 		end
 	elseif type(restart) == "string" and restart ~= "" and loadstring then
-		self:Destroy()
-		return loadstring(restart)()
+		local runner, compileError = loadstring(restart)
+		if type(runner) == "function" then
+			self:Destroy()
+			task.defer(runner)
+			return true
+		end
+		self:Notify({
+			Title = self:_GetLocalizationMessage("RestartUnavailableTitle", "Restart"),
+			Description = tostring(compileError or self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script.")),
+			Duration = 3,
+			Icon = "refresh-cw",
+		})
+		return false
 	end
 	self:Notify({
 		Title = self:_GetLocalizationMessage("RestartUnavailableTitle", "Restart"),
@@ -1815,7 +1879,7 @@ function Library:_HandleLanguageChanged(option, fireCallback, previousLanguage)
 	local language = option and option.Value or self._language
 	self._language = language ~= nil and tostring(language) or self._language
 	if self._localization then
-		self:LoadLanguage(self._language)
+		self:LoadLanguage(self._language, fireCallback ~= false)
 	end
 	WriteJsonFile(self.configFolder, GetConfigPath(self.configFolder, "__language"), {
 		Language = self._language,
@@ -1837,10 +1901,11 @@ function Library:_HandleLanguageChanged(option, fireCallback, previousLanguage)
 end
 
 function Library:SetLanguage(language, fireCallback)
+	local languageValue, option = ResolveLanguageValue(language, self._languageOptions)
 	if self._setTopBarLanguage then
-		self._setTopBarLanguage(language, fireCallback ~= false)
+		self._setTopBarLanguage(languageValue, fireCallback ~= false)
 	else
-		self:_HandleLanguageChanged({ Value = language, Label = language }, fireCallback ~= false, self._language)
+		self:_HandleLanguageChanged(option or { Value = languageValue, Label = languageValue }, fireCallback ~= false, self._language)
 	end
 end
 
@@ -2215,27 +2280,8 @@ function Library:_CreateTopBarLanguageSelect()
 		return
 	end
 	if #rawOptions <= 1 and not self._languageSelectorAlwaysVisible then
-		self._language = type(rawOptions[1]) == "table"
-				and (rawOptions[1].Value or rawOptions[1].Code or rawOptions[1].Id or rawOptions[1].Name or rawOptions[1].Label)
-			or rawOptions[1]
+		self._language = NormalizeLanguageOption(rawOptions[1]).Value
 		return
-	end
-
-	local function NormalizeLanguageOption(option)
-		if type(option) == "table" then
-			local value = option.Value or option.Code or option.Id or option.Name or option.Label or option[1]
-			local label = option.Label or option.Name or option.Title or value
-			return {
-				Label = tostring(label or ""),
-				Value = value ~= nil and value or label,
-				Raw = option,
-			}
-		end
-		return {
-			Label = tostring(option or ""),
-			Value = option,
-			Raw = option,
-		}
 	end
 
 	local function NormalizeLanguageOptions(options)
@@ -2259,8 +2305,9 @@ function Library:_CreateTopBarLanguageSelect()
 	end
 
 	local function FindLanguageOption(language)
+		local value = ResolveLanguageValue(language, options)
 		for _, option in ipairs(options) do
-			if option.Value == language or option.Label == tostring(language) then
+			if option.Value == value then
 				return option
 			end
 		end
