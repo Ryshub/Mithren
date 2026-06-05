@@ -1920,7 +1920,7 @@ function Library:Restart()
 			local ok, result = pcall(function()
 				return game:HttpGet(url)
 			end)
-			if ok then
+			if ok and type(result) == "string" and result ~= "" and not result:lower():find("404", 1, true) then
 				source = result
 			end
 		end
@@ -1936,6 +1936,7 @@ function Library:Restart()
 				Description = tostring(compileError or self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script.")),
 				Duration = 3,
 				Icon = "refresh-cw",
+				Force = true,
 			})
 			return false
 		end
@@ -1951,6 +1952,7 @@ function Library:Restart()
 			Description = tostring(compileError or self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script.")),
 			Duration = 3,
 			Icon = "refresh-cw",
+			Force = true,
 		})
 		return false
 	end
@@ -1959,6 +1961,7 @@ function Library:Restart()
 		Description = self:_GetLocalizationMessage("RestartUnavailableDescription", "No restart action was configured for this script."),
 		Duration = 3,
 		Icon = "refresh-cw",
+		Force = true,
 	})
 	return false
 end
@@ -1967,14 +1970,16 @@ function Library:_HandleLanguageChanged(option, fireCallback, previousLanguage)
 	previousLanguage = previousLanguage ~= nil and tostring(previousLanguage) or self._language
 	local language = option and option.Value or self._language
 	self._language = language ~= nil and tostring(language) or self._language
-	if self._localization then
-		self:LoadLanguage(self._language, fireCallback ~= false)
-	end
 	WriteJsonFile(self.configFolder, GetConfigPath(self.configFolder, "__language"), {
 		Language = self._language,
 	})
 	if fireCallback ~= false and type(self._languageCallback) == "function" then
-		self._languageCallback(self._language, option)
+		pcall(self._languageCallback, self._language, option)
+	end
+	if self._localization then
+		task.spawn(function()
+			self:LoadLanguage(self._language, fireCallback ~= false)
+		end)
 	end
 	local localization = self._localization
 	if
@@ -1985,7 +1990,11 @@ function Library:_HandleLanguageChanged(option, fireCallback, previousLanguage)
 		and localization.RestartOnChange
 		and localization.PromptRestart
 	then
-		self:PromptRestart()
+		task.defer(function()
+			if self.screenGui and self.screenGui.Parent then
+				self:PromptRestart()
+			end
+		end)
 	end
 end
 
