@@ -8,7 +8,7 @@ local hs = game:GetService("HttpService")
 local lcs = game:GetService("LocalizationService")
 
 local n = "Mithren"
-local MITHREN_VERSION = "v2.0.0"
+local MITHREN_VERSION = "v2.0.1"
 local CONFIG_ROOT = "MithrenConfigs_" .. MITHREN_VERSION:gsub("[^%w_%-]", "_")
 
 local c = {
@@ -6390,6 +6390,60 @@ function Library:_CreateSystemTabs()
 			MutedTextColor = Color3.fromRGB(140, 184, 164),
 			ScrollBarColor = Color3.fromRGB(82, 150, 116),
 		},
+		Amber = {
+			AccentColor = Color3.fromRGB(255, 190, 72),
+			BackgroundColor = Color3.fromRGB(15, 12, 8),
+			SecondaryColor = Color3.fromRGB(33, 26, 16),
+			BorderColor = Color3.fromRGB(91, 70, 36),
+			TextColor = Color3.fromRGB(255, 249, 235),
+			MutedTextColor = Color3.fromRGB(198, 172, 126),
+			ScrollBarColor = Color3.fromRGB(168, 124, 58),
+		},
+		Violet = {
+			AccentColor = Color3.fromRGB(168, 118, 255),
+			BackgroundColor = Color3.fromRGB(12, 9, 18),
+			SecondaryColor = Color3.fromRGB(25, 18, 39),
+			BorderColor = Color3.fromRGB(72, 55, 111),
+			TextColor = Color3.fromRGB(248, 244, 255),
+			MutedTextColor = Color3.fromRGB(174, 156, 207),
+			ScrollBarColor = Color3.fromRGB(124, 94, 184),
+		},
+		Cyan = {
+			AccentColor = Color3.fromRGB(63, 220, 230),
+			BackgroundColor = Color3.fromRGB(7, 13, 15),
+			SecondaryColor = Color3.fromRGB(14, 31, 35),
+			BorderColor = Color3.fromRGB(35, 87, 96),
+			TextColor = Color3.fromRGB(235, 253, 255),
+			MutedTextColor = Color3.fromRGB(133, 190, 198),
+			ScrollBarColor = Color3.fromRGB(70, 158, 170),
+		},
+		Rose = {
+			AccentColor = Color3.fromRGB(255, 111, 171),
+			BackgroundColor = Color3.fromRGB(16, 9, 14),
+			SecondaryColor = Color3.fromRGB(35, 18, 30),
+			BorderColor = Color3.fromRGB(94, 47, 76),
+			TextColor = Color3.fromRGB(255, 242, 249),
+			MutedTextColor = Color3.fromRGB(202, 147, 176),
+			ScrollBarColor = Color3.fromRGB(171, 82, 128),
+		},
+		Slate = {
+			AccentColor = Color3.fromRGB(170, 185, 205),
+			BackgroundColor = Color3.fromRGB(10, 12, 15),
+			SecondaryColor = Color3.fromRGB(22, 26, 32),
+			BorderColor = Color3.fromRGB(57, 65, 77),
+			TextColor = Color3.fromRGB(242, 246, 250),
+			MutedTextColor = Color3.fromRGB(156, 166, 180),
+			ScrollBarColor = Color3.fromRGB(101, 115, 133),
+		},
+		Mono = {
+			AccentColor = Color3.fromRGB(245, 245, 245),
+			BackgroundColor = Color3.fromRGB(8, 8, 8),
+			SecondaryColor = Color3.fromRGB(20, 20, 20),
+			BorderColor = Color3.fromRGB(58, 58, 58),
+			TextColor = Color3.fromRGB(250, 250, 250),
+			MutedTextColor = Color3.fromRGB(170, 170, 170),
+			ScrollBarColor = Color3.fromRGB(118, 118, 118),
+		},
 	}
 
 	local themeColorPickers = {}
@@ -6423,7 +6477,7 @@ function Library:_CreateSystemTabs()
 
 	Library._CreateDropdown(themeTab, {
 		Name = "Preset",
-		Options = { "Default", "Blue", "Crimson", "Green" },
+		Options = { "Default", "Blue", "Crimson", "Green", "Amber", "Violet", "Cyan", "Rose", "Slate", "Mono" },
 		Default = "Default",
 		Flag = "mithren_system_theme_preset",
 		Callback = function(selected)
