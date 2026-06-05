@@ -1351,6 +1351,7 @@ function Library.new(title, configFolder, config)
 	self._isLoading = false
 	self._autoSavePending = false
 	self._elementTransparency = 0.18
+	self._notificationsEnabled = config.NotificationsEnabled ~= false
 	local localizationConfig = config.Localization or config.I18n or config.I18nConfig
 	local localizationOptions = type(localizationConfig) == "table"
 			and (localizationConfig.Options or localizationConfig.Languages or localizationConfig.LanguageOptions)
@@ -1481,6 +1482,10 @@ function Library:Section(name)
 end
 
 function Library:Notify(config)
+	if self._notificationsEnabled == false and not (type(config) == "table" and config.Force == true) then
+		return nil
+	end
+	config = type(config) == "table" and config or {}
 	local c = self._c or c
 	local title = config.Title or "Notification"
 	local description = config.Description or ""
@@ -1570,6 +1575,14 @@ function Library:Notify(config)
 		notification:Destroy()
 	end)
 	return notification
+end
+
+function Library:SetNotificationsEnabled(enabled)
+	self._notificationsEnabled = enabled ~= false
+end
+
+function Library:AreNotificationsEnabled()
+	return self._notificationsEnabled ~= false
 end
 
 function Library:_SetupKeybindListener()
@@ -6271,6 +6284,15 @@ function Library:_CreateSystemTabs()
 			self:SetToggleKey(keyCode)
 		end,
 	}, self)
+
+	Library._CreateToggle(settingsTab, {
+		Name = "Notifications",
+		Default = self:AreNotificationsEnabled(),
+		Flag = "mithren_system_notifications_enabled",
+		Callback = function(enabled)
+			self:SetNotificationsEnabled(enabled == true)
+		end,
+	})
 
 	Library._CreateContentSection(themeTab, "Theme")
 
