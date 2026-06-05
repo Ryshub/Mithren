@@ -8,7 +8,7 @@ local hs = game:GetService("HttpService")
 local lcs = game:GetService("LocalizationService")
 
 local n = "Mithren"
-local MITHREN_VERSION = "v2.0.3"
+local MITHREN_VERSION = "v2.0.4"
 local CONFIG_ROOT = "MithrenConfigs_" .. MITHREN_VERSION:gsub("[^%w_%-]", "_")
 
 local c = {
@@ -2510,7 +2510,7 @@ function Library:_CreateTopBarLanguageSelect()
 		BackgroundColor3 = c.Secondary,
 		BackgroundTransparency = 0.22,
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -64, 0, 9),
+		Position = UDim2.new(1, -96, 0, 9),
 		BorderSizePixel = 0,
 		Size = UDim2.new(0, selectorWidth, 0, 27),
 		ZIndex = 4,
@@ -2765,8 +2765,8 @@ function Library:_Createv0rtexdControls()
 		Image = "",
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -35, 0, 15),
-		Size = UDim2.new(0, 15, 0, 15),
+		Position = UDim2.new(1, -54, 0, 15),
+		Size = UDim2.new(0, 16, 0, 16),
 		Parent = self.topBar,
 	})
 	ApplyLucideIcon(minimizeBtn, "minus", "minus", 48)
@@ -2776,7 +2776,9 @@ function Library:_Createv0rtexdControls()
 		Text = "",
 		Rotation = 0.01,
 		BackgroundTransparency = 1,
-		Size = UDim2.new(0, 21, 0, 15),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0, 30, 0, 28),
 		Parent = minimizeBtn,
 	})
 
@@ -2798,15 +2800,29 @@ function Library:_Createv0rtexdControls()
 		Image = "",
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -10, 0, 15),
-		Size = UDim2.new(0, 15, 0, 15),
+		Position = UDim2.new(1, -16, 0, 15),
+		Size = UDim2.new(0, 16, 0, 16),
 		Parent = self.topBar,
 	})
 	ApplyLucideIcon(closeBtn, "x", "x", 48)
 
-	closeBtn.MouseButton1Click:Connect(function()
+	local closeClickArea = CreateInstance("TextButton", {
+		Name = "TextButton",
+		Text = "",
+		Rotation = 0.01,
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(0, 30, 0, 28),
+		Parent = closeBtn,
+	})
+
+	local function OpenClosePrompt()
 		self:PromptClose()
-	end)
+	end
+
+	closeBtn.MouseButton1Click:Connect(OpenClosePrompt)
+	closeClickArea.MouseButton1Click:Connect(OpenClosePrompt)
 
 	closeBtn.MouseEnter:Connect(function()
 		CreateTween(closeBtn, { ImageColor3 = Color3.fromRGB(255, 100, 100) }, animationspeed.Fast)
