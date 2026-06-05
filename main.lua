@@ -1240,7 +1240,7 @@ function Library.new(title, configFolder, config)
 	self._maxSize = metrics.Max
 	self._mobileToggle = nil
 	self._configElements = {}
-	self._autoSave = false
+	self._autoSave = true
 	self._currentConfig = "default"
 	self._isLoading = false
 	self._autoSavePending = false
@@ -5995,13 +5995,12 @@ function Library:_CreateSystemTabs()
 	end
 	local settingsTab = section:CreateTab("Ajustes", "settings")
 	local themeTab = section:CreateTab("Tema", "palette")
-	local savesTab = section:CreateTab("Guardados", "save")
 
 	self.systemTabs = {
 		Section = section,
 		Settings = settingsTab,
 		Theme = themeTab,
-		Saves = savesTab,
+		Saves = settingsTab,
 	}
 
 	Library._CreateContentSection(settingsTab, "Ajustes")
@@ -6202,11 +6201,11 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 
-	Library._CreateConfigSection(savesTab, {
+	Library._CreateConfigSection(settingsTab, {
 		Title = "Guardados",
-		ShowHelp = true,
+		ShowHelp = false,
 		ShowAdvanced = true,
-		ShowAutoSave = true,
+		ShowAutoSave = false,
 		ShowUiKeybind = false,
 	})
 
@@ -6219,11 +6218,10 @@ function Library._CreateConfigSection(tab, config)
 
 	Library._CreateContentSection(tab, config.Title or "Saves")
 
-	if config.ShowHelp == true then
+	if config.ShowHelp == true and config.HelpTitle ~= nil and config.HelpContent ~= nil then
 		Library._CreateParagraph(tab, {
-			Title = config.HelpTitle or "Guardar y cargar",
-			Content = config.HelpContent
-				or "Guarda la configuracion de los controles y el tema visual de esta ventana.",
+			Title = config.HelpTitle,
+			Content = config.HelpContent,
 		})
 	end
 
@@ -6324,16 +6322,6 @@ function Library._CreateConfigSection(tab, config)
 					lib:ImportConfig(configName)
 					configDropdown:Refresh(lib:GetConfigs())
 				end
-			end,
-		})
-	end
-
-	if config.ShowAutoSave == true then
-		Library._CreateToggle(tab, {
-			Name = config.AutoSaveLabel or "Guardar cambios en sesion",
-			Default = lib._autoSave == true,
-			Callback = function(enabled)
-				lib:SetAutoSave(enabled)
 			end,
 		})
 	end
