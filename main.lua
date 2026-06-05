@@ -1484,6 +1484,9 @@ function Library:Section(name)
 end
 
 function Library:Notify(config)
+	if self._isDestroying then
+		return nil
+	end
 	if self._notificationsEnabled == false and not (type(config) == "table" and config.Force == true) then
 		return nil
 	end
@@ -3535,6 +3538,11 @@ function Library:_ToggleMinimize()
 end
 
 function Library:Destroy()
+	if self._destroyStarted then
+		return
+	end
+	self._destroyStarted = true
+	self._isDestroying = true
 	self:SaveConfig("__session", true)
 
 	if self._instanceKey and _G[self._instanceKey] == self then
@@ -3744,13 +3752,13 @@ function Library:SetAutoSave(enabled)
 end
 
 function Library:_AutoSaveTick()
-	if self._isLoading or self._autoSavePending then
+	if self._isDestroying or self._isLoading or self._autoSavePending then
 		return
 	end
 	self._autoSavePending = true
 	task.delay(0.5, function()
 		self._autoSavePending = false
-		if self.screenGui and self.screenGui.Parent then
+		if not self._isDestroying and self.screenGui and self.screenGui.Parent then
 			self:SaveConfig("__session", true)
 		end
 	end)
@@ -4574,6 +4582,9 @@ function Library._CreateSlider(tab, config)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
+		if _lib and _lib._isDestroying then
+			return
+		end
 		_origCb(...)
 		if _lib and (config.AutoSave or _lib._autoSave) then
 			_lib:_AutoSaveTick()
@@ -5031,6 +5042,9 @@ function Library._CreateToggle(tab, config)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
+		if _lib and _lib._isDestroying then
+			return
+		end
 		_origCb(...)
 		if _lib and (config.AutoSave or _lib._autoSave) then
 			_lib:_AutoSaveTick()
@@ -5165,6 +5179,9 @@ function Library._CreateDropdown(tab, config)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
+		if _lib and _lib._isDestroying then
+			return
+		end
 		_origCb(...)
 		if _lib and (config.AutoSave or _lib._autoSave) then
 			_lib:_AutoSaveTick()
@@ -5688,7 +5705,7 @@ function Library._CreateKeybind(tab, config, lib)
 			lib._keybinds[keybindId].enabled = currentKey ~= Enum.KeyCode.Unknown
 		end
 		UpdateKeyDisplay()
-		if fireChanged and type(config.Changed) == "function" then
+		if fireChanged and not (lib and lib._isDestroying) and type(config.Changed) == "function" then
 			config.Changed(currentKey)
 		end
 	end
@@ -5788,6 +5805,9 @@ function Library._CreateColorPicker(tab, config)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
+		if _lib and _lib._isDestroying then
+			return
+		end
 		_origCb(...)
 		if _lib and (config.AutoSave or _lib._autoSave) then
 			_lib:_AutoSaveTick()
@@ -6144,6 +6164,9 @@ function Library._CreateTextBox(tab, config)
 	local _lib = tab and tab._library
 	local _origCb = config.Callback or function() end
 	local callback = function(...)
+		if _lib and _lib._isDestroying then
+			return
+		end
 		_origCb(...)
 		if _lib and (config.AutoSave or _lib._autoSave) then
 			_lib:_AutoSaveTick()
