@@ -8,6 +8,8 @@ local hs = game:GetService("HttpService")
 local lcs = game:GetService("LocalizationService")
 
 local n = "Mithren"
+local MITHREN_VERSION = "v2.0.0"
+local CONFIG_ROOT = "MithrenConfigs_" .. MITHREN_VERSION:gsub("[^%w_%-]", "_")
 
 local c = {
 	Background = Color3.fromRGB(10, 10, 11),
@@ -948,7 +950,7 @@ local function SanitizeConfigName(value)
 end
 
 local function GetConfigRoot(configFolder)
-	return "MithrenConfigs/" .. SanitizeConfigName(configFolder or "Mithren")
+	return CONFIG_ROOT .. "/" .. SanitizeConfigName(configFolder or "Mithren")
 end
 
 local function GetConfigPath(configFolder, configName)
@@ -956,8 +958,8 @@ local function GetConfigPath(configFolder, configName)
 end
 
 local function EnsureConfigFolder(configFolder)
-	if isfolder and makefolder and not isfolder("MithrenConfigs") then
-		makefolder("MithrenConfigs")
+	if isfolder and makefolder and not isfolder(CONFIG_ROOT) then
+		makefolder(CONFIG_ROOT)
 	end
 	local root = GetConfigRoot(configFolder)
 	if isfolder and makefolder and not isfolder(root) then
@@ -1906,44 +1908,39 @@ end
 
 function Library:Restart()
 	local restart = self._restartConfig
-	if type(restart) == "function" then
-		return restart(self)
+	local function CloseCurrentUi()
+		local destroyOk, destroyError = pcall(function()
+			self:Destroy()
+		end)
+		if destroyOk then
+			return true
+		end
+		warn("[Mithren] Script destroy hook failed: " .. tostring(destroyError))
+		local baseDestroyOk, baseDestroyError = pcall(function()
+			Library.Destroy(self)
+		end)
+		if not baseDestroyOk then
+			warn("[Mithren] Base destroy failed: " .. tostring(baseDestroyError))
+			return false
+		end
+		return true
 	end
-	local function NotifyRestartError(description)
-		self:Notify({
-			Title = "Restart",
-			Description = tostring(description or "No restart action was configured for this script."),
-			Duration = 4,
-			Icon = "refresh-cw",
-			Force = true,
-		})
-	end
-	local function RunSource(source)
+	local function RunSource(source, closed)
 		if type(source) ~= "string" or source == "" then
-			NotifyRestartError("No restart source is available.")
+			warn("[Mithren] Restart source is not available. Current UI was closed.")
 			return false
 		end
 		if not loadstring then
-			NotifyRestartError("loadstring is not available in this executor.")
+			warn("[Mithren] loadstring is not available. Current UI was closed.")
 			return false
 		end
 		local runner, compileError = loadstring(source)
 		if type(runner) ~= "function" then
-			NotifyRestartError(compileError or "Could not compile restart source.")
+			warn("[Mithren] Could not compile restart source: " .. tostring(compileError))
 			return false
 		end
-		local destroyOk, destroyError = pcall(function()
-			self:Destroy()
-		end)
-		if not destroyOk then
-			warn("[Mithren] Script destroy hook failed: " .. tostring(destroyError))
-			local baseDestroyOk, baseDestroyError = pcall(function()
-				Library.Destroy(self)
-			end)
-			if not baseDestroyOk then
-				NotifyRestartError("Could not close current UI: " .. tostring(baseDestroyError))
-				return false
-			end
+		if closed ~= true and not CloseCurrentUi() then
+			return false
 		end
 		task.defer(function()
 			local ok, runError = pcall(runner)
@@ -1953,10 +1950,28 @@ function Library:Restart()
 		end)
 		return true
 	end
-	if type(restart) == "table" then
+	local closed = CloseCurrentUi()
+	if not closed then
+		return false
+	end
+	if type(restart) == "function" then
+		task.defer(function()
+			local ok, callbackError = pcall(restart, self)
+			if not ok then
+				warn("[Mithren] Restart callback failed: " .. tostring(callbackError))
+			end
+		end)
+		return true
+	elseif type(restart) == "table" then
 		local callback = restart.Callback or restart.Function or restart.Reexecute
 		if type(callback) == "function" then
-			return callback(self)
+			task.defer(function()
+				local ok, callbackError = pcall(callback, self)
+				if not ok then
+					warn("[Mithren] Restart callback failed: " .. tostring(callbackError))
+				end
+			end)
+			return true
 		end
 		local source = restart.Source or restart.Script
 		local url = restart.Url or restart.SourceUrl or restart.ScriptUrl
@@ -1968,11 +1983,11 @@ function Library:Restart()
 				source = result
 			end
 		end
-		return RunSource(source)
+		return RunSource(source, true)
 	elseif type(restart) == "string" then
-		return RunSource(restart)
+		return RunSource(restart, true)
 	end
-	NotifyRestartError("No restart action was configured for this script.")
+	warn("[Mithren] No restart action was configured. Current UI was closed.")
 	return false
 end
 
