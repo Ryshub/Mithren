@@ -3311,7 +3311,7 @@ end
 function Library:SaveConfig(configName, silent)
 	if not writefile then
 		if not silent then
-			self:Notify({ Title = "Error", Description = "Sistema de archivos no disponible", Duration = 3 })
+			self:Notify({ Title = "Error", Description = "File system is not available", Duration = 3 })
 		end
 		return false
 	end
@@ -3336,8 +3336,8 @@ function Library:SaveConfig(configName, silent)
 		end
 		if not silent then
 			self:Notify({
-				Title = "Save guardado",
-				Description = '"' .. configName .. '" guardado',
+				Title = "Save saved",
+				Description = '"' .. configName .. '" saved',
 				Duration = 2,
 				Icon = "save",
 			})
@@ -3345,7 +3345,7 @@ function Library:SaveConfig(configName, silent)
 		return true
 	else
 		if not silent then
-			self:Notify({ Title = "Error", Description = "No se pudo guardar", Duration = 3 })
+			self:Notify({ Title = "Error", Description = "Could not save", Duration = 3 })
 		end
 		return false
 	end
@@ -3354,7 +3354,7 @@ end
 function Library:LoadConfig(configName, silent)
 	if not readfile or not isfile then
 		if not silent then
-			self:Notify({ Title = "Error", Description = "Sistema de archivos no disponible", Duration = 3 })
+			self:Notify({ Title = "Error", Description = "File system is not available", Duration = 3 })
 		end
 		return false
 	end
@@ -3362,7 +3362,7 @@ function Library:LoadConfig(configName, silent)
 	local path = GetConfigPath(self.configFolder, configName)
 	if not isfile(path) then
 		if not silent then
-			self:Notify({ Title = "Error", Description = "Save no encontrado: " .. configName, Duration = 3 })
+			self:Notify({ Title = "Error", Description = "Save not found: " .. configName, Duration = 3 })
 		end
 		return false
 	end
@@ -3373,7 +3373,7 @@ function Library:LoadConfig(configName, silent)
 
 	if not success or not data then
 		if not silent then
-			self:Notify({ Title = "Error", Description = "No se pudo cargar el save", Duration = 3 })
+			self:Notify({ Title = "Error", Description = "Could not load save", Duration = 3 })
 		end
 		return false
 	end
@@ -3404,8 +3404,8 @@ function Library:LoadConfig(configName, silent)
 
 	if not silent then
 		self:Notify({
-			Title = "Save cargado",
-			Description = '"' .. configName .. '" cargado',
+			Title = "Save loaded",
+			Description = '"' .. configName .. '" loaded',
 			Duration = 2,
 			Icon = "save",
 		})
@@ -3454,48 +3454,48 @@ end
 
 function Library:ExportConfig(configName)
 	if not readfile or not isfile then
-		self:Notify({ Title = "Exportar", Description = "Sistema de archivos no disponible", Duration = 2.5 })
+		self:Notify({ Title = "Export", Description = "File system is not available", Duration = 2.5 })
 		return false
 	end
 	local path = GetConfigPath(self.configFolder, configName)
 	if not isfile(path) then
-		self:Notify({ Title = "Exportar", Description = "Save no encontrado: " .. configName, Duration = 2.5 })
+		self:Notify({ Title = "Export", Description = "Save not found: " .. configName, Duration = 2.5 })
 		return false
 	end
 	local ok, content = pcall(readfile, path)
 	if ok and content and setclipboard then
 		setclipboard(content)
 		self:Notify({
-			Title = "Exportar",
-			Description = '"' .. configName .. '" copiado al portapapeles',
+			Title = "Export",
+			Description = '"' .. configName .. '" copied to clipboard',
 			Duration = 2.5,
 			Icon = "save",
 		})
 		return true
 	end
-	self:Notify({ Title = "Exportar", Description = "No se pudo exportar", Duration = 2.5 })
+	self:Notify({ Title = "Export", Description = "Could not export", Duration = 2.5 })
 	return false
 end
 
 function Library:ImportConfig(configName)
 	if not getclipboard then
-		self:Notify({ Title = "Importar", Description = "Portapapeles no disponible en este ejecutor", Duration = 2.5 })
+		self:Notify({ Title = "Import", Description = "Clipboard is not available in this executor", Duration = 2.5 })
 		return false
 	end
 	local ok, json = pcall(getclipboard)
 	if not ok or type(json) ~= "string" or json:gsub("%s", "") == "" then
-		self:Notify({ Title = "Importar", Description = "Portapapeles vacío o inválido", Duration = 2.5 })
+		self:Notify({ Title = "Import", Description = "Clipboard is empty or invalid", Duration = 2.5 })
 		return false
 	end
 	local ok2, data = pcall(function()
 		return hs:JSONDecode(json)
 	end)
 	if not ok2 or type(data) ~= "table" then
-		self:Notify({ Title = "Importar", Description = "JSON inválido en el portapapeles", Duration = 3 })
+		self:Notify({ Title = "Import", Description = "Invalid JSON in clipboard", Duration = 3 })
 		return false
 	end
 	if not writefile then
-		self:Notify({ Title = "Importar", Description = "Sistema de archivos no disponible", Duration = 2.5 })
+		self:Notify({ Title = "Import", Description = "File system is not available", Duration = 2.5 })
 		return false
 	end
 	EnsureConfigFolder(self.configFolder)
@@ -3507,7 +3507,7 @@ function Library:ImportConfig(configName)
 		self:LoadConfig(saveName)
 		return true
 	end
-	self:Notify({ Title = "Importar", Description = "Error al guardar el archivo", Duration = 3 })
+	self:Notify({ Title = "Import", Description = "Could not save file", Duration = 3 })
 	return false
 end
 
@@ -5989,12 +5989,12 @@ function Library:_CreateSystemTabs()
 		return self.systemTabs
 	end
 
-	local section = self:CreateSection("Ajustes")
+	local section = self:CreateSection("Settings")
 	if section.frame then
 		section.frame.LayoutOrder = 9999
 	end
-	local settingsTab = section:CreateTab("Ajustes", "settings")
-	local themeTab = section:CreateTab("Tema", "palette")
+	local settingsTab = section:CreateTab("Settings", "settings")
+	local themeTab = section:CreateTab("Theme", "palette")
 
 	self.systemTabs = {
 		Section = section,
@@ -6003,10 +6003,10 @@ function Library:_CreateSystemTabs()
 		Saves = settingsTab,
 	}
 
-	Library._CreateContentSection(settingsTab, "Ajustes")
+	Library._CreateContentSection(settingsTab, "Settings")
 
 	Library._CreateKeybind(settingsTab, {
-		Name = "Abrir/cerrar UI",
+		Name = "Open/close UI",
 		Default = self:GetToggleKey(),
 		Flag = "mithren_system_toggle_keybind",
 		Register = false,
@@ -6015,7 +6015,7 @@ function Library:_CreateSystemTabs()
 		end,
 	}, self)
 
-	Library._CreateContentSection(themeTab, "Tema")
+	Library._CreateContentSection(themeTab, "Theme")
 
 	local themePresets = {
 		Default = {
@@ -6072,7 +6072,7 @@ function Library:_CreateSystemTabs()
 
 	local colorRowA = Library._CreateRow(themeTab, { Columns = 3 })
 	colorRowA:CreateColorPicker({
-		Name = "Principal",
+		Name = "Primary",
 		Default = self._theme.AccentColor,
 		Flag = "mithren_system_accent_color",
 		Callback = function(color)
@@ -6080,7 +6080,7 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 	colorRowA:CreateColorPicker({
-		Name = "Fondo",
+		Name = "Background",
 		Default = self._theme.BackgroundColor,
 		Flag = "mithren_system_background_color",
 		Callback = function(color)
@@ -6098,7 +6098,7 @@ function Library:_CreateSystemTabs()
 
 	local colorRowB = Library._CreateRow(themeTab, { Columns = 3 })
 	colorRowB:CreateColorPicker({
-		Name = "Bordes",
+		Name = "Borders",
 		Default = self._theme.BorderColor,
 		Flag = "mithren_system_border_color",
 		Callback = function(color)
@@ -6106,7 +6106,7 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 	colorRowB:CreateColorPicker({
-		Name = "Texto",
+		Name = "Text",
 		Default = self._theme.TextColor,
 		Flag = "mithren_system_text_color",
 		Callback = function(color)
@@ -6114,7 +6114,7 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 	colorRowB:CreateColorPicker({
-		Name = "Texto secundario",
+		Name = "Muted text",
 		Default = self._theme.MutedTextColor,
 		Flag = "mithren_system_muted_text_color",
 		Callback = function(color)
@@ -6133,7 +6133,7 @@ function Library:_CreateSystemTabs()
 
 	local transparencyRow = Library._CreateRow(themeTab, { Columns = 2 })
 	transparencyRow:CreateSlider({
-		Name = "Transparencia panel",
+		Name = "Panel transparency",
 		Min = 0,
 		Max = 90,
 		Default = math.floor((self._theme.PanelTransparency or 0.03) * 100 + 0.5),
@@ -6143,7 +6143,7 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 	transparencyRow:CreateSlider({
-		Name = "Transparencia elementos",
+		Name = "Element transparency",
 		Min = 0,
 		Max = 90,
 		Default = math.floor((self._theme.ElementTransparency or self._elementTransparency or 0.18) * 100 + 0.5),
@@ -6153,10 +6153,10 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 
-	Library._CreateContentSection(themeTab, "Fondo")
+	Library._CreateContentSection(themeTab, "Background")
 	local backgroundRow = Library._CreateRow(themeTab, { Columns = 2 })
 	backgroundRow:CreateToggle({
-		Name = "Imagen de fondo",
+		Name = "Background image",
 		Default = self._theme.BackgroundImageEnabled == true,
 		Flag = "mithren_system_background_enabled",
 		Callback = function(enabled)
@@ -6164,7 +6164,7 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 	backgroundRow:CreateSlider({
-		Name = "Oscurecer",
+		Name = "Darken",
 		Min = 0,
 		Max = 90,
 		Default = math.floor((self._theme.BackgroundDim or 0.45) * 100 + 0.5),
@@ -6175,7 +6175,7 @@ function Library:_CreateSystemTabs()
 	})
 
 	Library._CreateTextBox(themeTab, {
-		Name = "Imagen",
+		Name = "Image",
 		Default = self._theme.BackgroundImage or "",
 		Placeholder = "rbxassetid://...",
 		Flag = "mithren_system_background_image",
@@ -6194,7 +6194,7 @@ function Library:_CreateSystemTabs()
 	})
 
 	Library._CreateButton(themeTab, {
-		Name = "Reset tema",
+		Name = "Reset theme",
 		Icon = "rotate-ccw",
 		Callback = function()
 			self:ResetTheme()
@@ -6202,7 +6202,7 @@ function Library:_CreateSystemTabs()
 	})
 
 	Library._CreateConfigSection(settingsTab, {
-		Title = "Guardados",
+		Title = "Saves",
 		ShowHelp = false,
 		ShowAdvanced = true,
 		ShowAutoSave = false,
@@ -6226,7 +6226,7 @@ function Library._CreateConfigSection(tab, config)
 	end
 
 	local configNameBox = Library._CreateTextBox(tab, {
-		Name = config.NameLabel or "Nombre del save",
+		Name = config.NameLabel or "Save name",
 		Default = lib._currentConfig or "default",
 		Placeholder = config.NamePlaceholder or "default",
 		Callback = function(text)
@@ -6252,7 +6252,7 @@ function Library._CreateConfigSection(tab, config)
 
 	local configDropdown
 	configDropdown = Library._CreateDropdown(tab, {
-		Name = config.SelectLabel or "Elegir save",
+		Name = config.SelectLabel or "Select save",
 		Options = savedConfigs,
 		Default = selectedConfig,
 		Callback = function(selected)
@@ -6263,7 +6263,7 @@ function Library._CreateConfigSection(tab, config)
 	})
 
 	Library._CreateButton(tab, {
-		Name = config.SaveLabel or "Guardar save",
+		Name = config.SaveLabel or "Save",
 		Callback = function()
 			local configName = SanitizeConfigName(configNameBox:GetText())
 			if configName and configName ~= "" then
@@ -6274,7 +6274,7 @@ function Library._CreateConfigSection(tab, config)
 	})
 
 	Library._CreateButton(tab, {
-		Name = config.LoadLabel or "Cargar save",
+		Name = config.LoadLabel or "Load",
 		Callback = function()
 			local configName = SanitizeConfigName(configNameBox:GetText())
 			if configName and configName ~= "" then
@@ -6284,7 +6284,7 @@ function Library._CreateConfigSection(tab, config)
 	})
 
 	Library._CreateButton(tab, {
-		Name = config.DeleteLabel or "Borrar save",
+		Name = config.DeleteLabel or "Delete",
 		Callback = function()
 			local configName = SanitizeConfigName(configNameBox:GetText())
 			if configName and configName ~= "" then
@@ -6296,15 +6296,15 @@ function Library._CreateConfigSection(tab, config)
 
 	if config.ShowAdvanced == true then
 		Library._CreateButton(tab, {
-			Name = config.RefreshLabel or "Actualizar lista",
+			Name = config.RefreshLabel or "Refresh list",
 			Callback = function()
 				configDropdown:Refresh(lib:GetConfigs())
-				lib:Notify({ Title = "Saves", Description = "Lista actualizada", Duration = 2, Icon = "save" })
+				lib:Notify({ Title = "Saves", Description = "List refreshed", Duration = 2, Icon = "save" })
 			end,
 		})
 
 		Library._CreateButton(tab, {
-			Name = config.ExportLabel or "Exportar save",
+			Name = config.ExportLabel or "Export save",
 			Callback = function()
 				local configName = SanitizeConfigName(configNameBox:GetText())
 				if configName and configName ~= "" then
@@ -6315,7 +6315,7 @@ function Library._CreateConfigSection(tab, config)
 		})
 
 		Library._CreateButton(tab, {
-			Name = config.ImportLabel or "Importar save",
+			Name = config.ImportLabel or "Import save",
 			Callback = function()
 				local configName = SanitizeConfigName(configNameBox:GetText())
 				if configName and configName ~= "" then
@@ -6328,7 +6328,7 @@ function Library._CreateConfigSection(tab, config)
 
 	if config.ShowUiKeybind ~= false then
 		Library._CreateKeybind(tab, {
-			Name = config.UiKeybindLabel or "Tecla para UI",
+			Name = config.UiKeybindLabel or "UI key",
 			Default = lib:GetToggleKey(),
 			Flag = config.UiKeybindFlag or "mithren_toggle_ui_keybind",
 			Register = false,

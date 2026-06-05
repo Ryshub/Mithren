@@ -32,10 +32,10 @@ local UI = Mithren:Window({
 UI:SetVersionTag("v1.0.1")
 ```
 
-Mithren crea siempre una seccion interna `Ajustes` con tabs estandar:
+Mithren always creates a built-in `Settings` section with standard tabs:
 
-- `Ajustes`: tecla para abrir/cerrar UI y guardados.
-- `Tema`: preset, colores, transparencias, fondo y reset.
+- `Settings`: UI toggle key and saves.
+- `Theme`: presets, colors, transparency, background and reset.
 
 Puedes acceder a esos tabs desde `UI.systemTabs`.
 
