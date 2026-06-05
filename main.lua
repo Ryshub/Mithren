@@ -6056,6 +6056,25 @@ function Library:_CreateSystemTabs()
 		},
 	}
 
+	local themeColorPickers = {}
+	local function syncThemeColorPickers(theme)
+		theme = theme or self:GetTheme()
+		local pickerMap = {
+			AccentColor = themeColorPickers.AccentColor,
+			BackgroundColor = themeColorPickers.BackgroundColor,
+			SecondaryColor = themeColorPickers.SecondaryColor,
+			BorderColor = themeColorPickers.BorderColor,
+			TextColor = themeColorPickers.TextColor,
+			MutedTextColor = themeColorPickers.MutedTextColor,
+			ScrollBarColor = themeColorPickers.ScrollBarColor,
+		}
+		for key, picker in pairs(pickerMap) do
+			if picker and typeof(theme[key]) == "Color3" and type(picker.SetColor) == "function" then
+				picker:SetColor(theme[key])
+			end
+		end
+	end
+
 	Library._CreateDropdown(themeTab, {
 		Name = "Preset",
 		Options = { "Default", "Blue", "Crimson", "Green" },
@@ -6066,12 +6085,13 @@ function Library:_CreateSystemTabs()
 			local preset = themePresets[tostring(presetName or "")]
 			if preset then
 				self:SetTheme(preset)
+				syncThemeColorPickers(preset)
 			end
 		end,
 	})
 
 	local colorRowA = Library._CreateRow(themeTab, { Columns = 3 })
-	colorRowA:CreateColorPicker({
+	themeColorPickers.AccentColor = colorRowA:CreateColorPicker({
 		Name = "Primary",
 		Default = self._theme.AccentColor,
 		Flag = "mithren_system_accent_color",
@@ -6079,7 +6099,7 @@ function Library:_CreateSystemTabs()
 			self:SetTheme({ AccentColor = color })
 		end,
 	})
-	colorRowA:CreateColorPicker({
+	themeColorPickers.BackgroundColor = colorRowA:CreateColorPicker({
 		Name = "Background",
 		Default = self._theme.BackgroundColor,
 		Flag = "mithren_system_background_color",
@@ -6087,7 +6107,7 @@ function Library:_CreateSystemTabs()
 			self:SetTheme({ BackgroundColor = color })
 		end,
 	})
-	colorRowA:CreateColorPicker({
+	themeColorPickers.SecondaryColor = colorRowA:CreateColorPicker({
 		Name = "Panel",
 		Default = self._theme.SecondaryColor,
 		Flag = "mithren_system_secondary_color",
@@ -6097,7 +6117,7 @@ function Library:_CreateSystemTabs()
 	})
 
 	local colorRowB = Library._CreateRow(themeTab, { Columns = 3 })
-	colorRowB:CreateColorPicker({
+	themeColorPickers.BorderColor = colorRowB:CreateColorPicker({
 		Name = "Borders",
 		Default = self._theme.BorderColor,
 		Flag = "mithren_system_border_color",
@@ -6105,7 +6125,7 @@ function Library:_CreateSystemTabs()
 			self:SetTheme({ BorderColor = color })
 		end,
 	})
-	colorRowB:CreateColorPicker({
+	themeColorPickers.TextColor = colorRowB:CreateColorPicker({
 		Name = "Text",
 		Default = self._theme.TextColor,
 		Flag = "mithren_system_text_color",
@@ -6113,7 +6133,7 @@ function Library:_CreateSystemTabs()
 			self:SetTheme({ TextColor = color })
 		end,
 	})
-	colorRowB:CreateColorPicker({
+	themeColorPickers.MutedTextColor = colorRowB:CreateColorPicker({
 		Name = "Muted text",
 		Default = self._theme.MutedTextColor,
 		Flag = "mithren_system_muted_text_color",
@@ -6122,7 +6142,7 @@ function Library:_CreateSystemTabs()
 		end,
 	})
 
-	Library._CreateColorPicker(themeTab, {
+	themeColorPickers.ScrollBarColor = Library._CreateColorPicker(themeTab, {
 		Name = "Scroll",
 		Default = self._theme.ScrollBarColor,
 		Flag = "mithren_system_scroll_color",
@@ -6198,6 +6218,7 @@ function Library:_CreateSystemTabs()
 		Icon = "rotate-ccw",
 		Callback = function()
 			self:ResetTheme()
+			syncThemeColorPickers()
 		end,
 	})
 
